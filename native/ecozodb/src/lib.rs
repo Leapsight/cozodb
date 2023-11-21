@@ -1,51 +1,195 @@
-// use std::collections::BTreeMap;
-use serde_rustler::to_term;
+// use serde_rustler::to_term;
 use rustler::NifResult;
 use rustler::Env;
 use rustler::Error;
-// use rustler::ErlOption;
-use rustler::NifMap;
-use rustler::NifTuple;
-use rustler::NifUnitEnum;
-use rustler::NifTaggedEnum;
-use rustler::NifUntaggedEnum;
+use rustler::Encoder;
 use rustler::ResourceArc;
 use rustler::Term;
 use cozo::*;
+use ndarray::Array1; // used by cozo
 
 
+
+// =============================================================================
+// RUSTLER SETUP
+// =============================================================================
+
+
+
+// We define atoms in Rustler
 mod atoms {
     rustler::atoms! {
         ok,
         undefined,
+        nil,
         error,
         mem,
         sqlite,
         rocksdb,
         sled,
-        tikv,
-        result_set
+        tikv
     }
 }
+
+
+// INIT
+rustler::init!("ecozodb",
+    [
+      new,
+      run_script,
+      run_script_json,
+      debug_run_script
+    ],
+    load = on_load
+);
+
+
+fn on_load(env: Env, _: Term) -> bool {
+    rustler::resource!(DbResource, env);
+    true
+}
+
+
+
+// =============================================================================
+// STRUCTS
+// =============================================================================
 
 
 struct DbResource {
     pub db: DbInstance
 }
 
+/// DataValueWrapper wrapps the DataValue struct defined in Cozo as:
+/// ```
+/// pub enum DataValue {
+///     /// null
+///     Null,
+///     /// boolean
+///     Bool(bool),
+///     /// number, may be int or float
+///     Num(Num),
+///     /// string
+///     Str(SmartString<LazyCompact>),
+///     /// bytes
+///     #[serde(with = "serde_bytes")]
+///     Bytes(Vec<u8>),
+///     /// UUID
+///     Uuid(UuidWrapper),
+///     /// Regex, used internally only  => we don't need to encode
+///     Regex(RegexWrapper),
+///     /// list
+///     List(Vec<DataValue>),
+///     /// set, used internally only => we don't need to encode
+///     Set(BTreeSet<DataValue>),
+///     /// Array, mainly for proximity search
+///     Vec(Vector),
+///     /// Json
+///     Json(JsonData),
+///     /// validity,
+///     Validity(Validity),
+///     /// bottom type, used internally only => we don't need to encode
+///     Bot,
+/// }
+/// ```
+struct DataValueWrapper(DataValue);
 
+impl<'a> Encoder for DataValueWrapper {
+    fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
+        match &self.0 {
+            DataValue::Null => atoms::nil().encode(env),
+            DataValue::Bool(i) => i.encode(env),
+            // number, may be int or float
+            DataValue::Num(i) => NumWrapper(i.clone()).encode(env),
+            DataValue::Str(i) => i.encode(env),
+            DataValue::Bytes(i) => i.encode(env),
+            DataValue::Uuid(w) => w.0.hyphenated().to_string().encode(env),
+            DataValue::List(i) => {
+                let encoded_values: Vec<Term<'b>> = i
+                    .iter()
+                    .map(|val| DataValueWrapper(val.clone()).encode(env))
+                    .collect();
 
-// API
+                encoded_values.encode(env)
+            },
+            DataValue::Json(i) => {
+                match serde_json::to_string(&i) {
+                    Ok(json_str) =>
+                        json_str.encode(env),
+                    Err(_) =>
+                        "error: failed to serialize JsonValue".encode(env),
+                }
+            }
+            DataValue::Vec(i) => VectorWrapper(i.clone()).encode(env),
+            DataValue::Validity(i) => {
+                let ts = i.timestamp.0.0.encode(env);
+                let assert = i.is_assert.0.encode(env);
+                // (float, bool)
+                (ts, assert).encode(env)
+            },
+            DataValue::Regex(_) | DataValue::Set(_) | DataValue::Bot =>
+                // this will never get called as they are only used internally
+                // but if they do we just return
+                "ignored".to_string().encode(env)
+        }
+    }
+}
 
-fn load(env: Env, _: Term) -> bool {
-    rustler::resource!(DbResource, env);
-    true
+struct NumWrapper(Num);
+
+impl<'a> Encoder for NumWrapper {
+    fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
+        match &self.0 {
+            Num::Int(i) => i.encode(env),
+            Num::Float(f) => f.encode(env),
+        }
+    }
+}
+
+struct VectorWrapper(Vector);
+
+impl<'a> Encoder for VectorWrapper {
+    fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
+        match &self.0 {
+            Vector::F32(i) => Array32Wrapper(i.clone()).encode(env),
+            Vector::F64(i) => Array64Wrapper(i.clone()).encode(env),
+        }
+    }
+}
+
+struct Array32Wrapper(Array1<f32>);  // Used by Vector
+
+impl<'a> Encoder for Array32Wrapper {
+    fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
+        // Convert ndarray::Array1 to a Vec<f32>
+        let vec: Vec<f32> = self.0.to_vec();
+        // Encode the Vec<f32> as an Elixir list
+        vec.encode(env)
+    }
+}
+
+struct Array64Wrapper(Array1<f64>);  // Used by Vector
+
+impl<'a> Encoder for Array64Wrapper {
+    fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
+        // Convert ndarray::Array1 to a Vec<f64>
+        let vec: Vec<f64> = self.0.to_vec();
+        // Encode the Vec<f64> as an Elixir list
+        vec.encode(env)
+    }
 }
 
 
+// =============================================================================
+// OPERATIONS
+// =============================================================================
+
+
+
+/// Returns a new cozo engine
 #[rustler::nif(schedule = "DirtyCpu")]
-fn new(engine: Term, path: String, _options:&str) ->
-    Result<ResourceArc<DbResource>, Error> {
+fn new<'a>(env: Env<'a>, engine: Term, path: String, _options:&str) ->
+    Result<Term<'a>, Error> {
     let engine_str = engine.atom_to_string().unwrap();
             let db = DbInstance::new(
         &engine_str,
@@ -54,34 +198,68 @@ fn new(engine: Term, path: String, _options:&str) ->
     let resource = ResourceArc::new(DbResource {
         db: db
     });
-    Ok(resource)
+    Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
 }
 
 
-// #[rustler::nif(schedule = "DirtyCpu")]
-// fn run_script(env: Env, resource: ResourceArc<DbResource>, script: String) -> NifResult<Term<>>
-//  {
-//     let result = resource.db.run_script(
-//         &script,
-//         Default::default(),
-//         ScriptMutability::Immutable
-//     ).unwrap();
-//     to_term(env, ResultSet::new(result)).map_err(|err| err.into())
+/// Returns the result of running script
+#[rustler::nif(schedule = "DirtyIo")]
+fn run_script<'a>(
+    env: Env<'a>, resource: ResourceArc<DbResource>, script: String
+    ) -> NifResult<Term<'a>> {
 
-// }
+    let named_rows = resource.db.run_script(
+        &script,
+        Default::default(),
+        ScriptMutability::Immutable
+    ).unwrap();
 
-#[rustler::nif(schedule = "DirtyCpu")]
-fn run_script_json(env: Env, resource: ResourceArc<DbResource>, script: String) -> NifResult<Term<>>{
+    // let nxt = match named_rows.next {
+    //         None => atoms::nil(),
+    //         Some(more) => more.into_json(),
+    //     };
+    // let rows = self
+    //     .rows
+    //     .into_iter()
+    //     .map(|row| row.into_iter().map(JsonValue::from).collect::<JsonValue>())
+    //     .collect::<JsonValue>();
+
+    let wrapped_data: Vec<Vec<DataValueWrapper>> =
+        named_rows.rows
+            .into_iter()
+            .map(|inner_vec|
+                inner_vec.into_iter().map(DataValueWrapper).collect())
+            .collect();
+
+    let result = (
+        atoms::ok().encode(env),
+        named_rows.headers,
+        wrapped_data
+    );
+    Ok(result.encode(env))
+
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn run_script_json<'a>(
+    env: Env<'a>, resource: ResourceArc<DbResource>, script: String
+    ) -> NifResult<Term<'a>>  {
     let result = resource.db.run_script(
         &script,
         Default::default(),
         ScriptMutability::Immutable
     ).unwrap();
-    to_term(env, result.into_json()).map_err(|err| err.into())
+
+    let json = result.into_json();
+
+    match serde_json::to_string(&json) {
+        Ok(json_str) => Ok(json_str.encode(env)),
+        Err(_) => Err(rustler::Error::Atom("json_encode_error"))
+    }
 
 }
 
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 fn debug_run_script(resource: ResourceArc<DbResource>, script: String)
  {
     let result = resource.db.run_script(
@@ -90,133 +268,17 @@ fn debug_run_script(resource: ResourceArc<DbResource>, script: String)
         ScriptMutability::Immutable
     ).unwrap();
     println!("{:?}", result);
-
-}
-
-// SUPPORT
-
-
-
-// INIT
-
-rustler::init!("ecozodb",
-    [
-      new
-    // , run_script
-    , run_script_json
-    , debug_run_script
-    // Demo
-    , add_nif
-    , my_map_nif
-    , my_list
-    , my_maps
-    , my_tuple
-    , unit_enum_echo
-    , tagged_enum_echo
-    , untagged_enum_echo
-    , my_string
-    ],
-    load = load
-);
-
-
-// ========================================================================
-// RUSTLER TESTS
-// See Derive Macros docs at https://docs.rs/rustler/0.26.0/rustler/index.html#derives
-
-#[derive(NifMap)]
-struct MyMap {
-    lhs: i32,
-    rhs: i32,
-}
-
-#[derive(NifTuple)]
-struct MyTuple {
-    lhs: i32,
-    rhs: i32
-}
-
-#[derive(NifUnitEnum)]
-enum UnitEnum {
-    FooBar,
-    Baz,
-}
-
-#[derive(NifTaggedEnum)]
-enum TaggedEnum {
-    Foo,
-    Bar(String),
-    Baz{ a: i32, b: i32 },
-}
-
-#[derive(NifUntaggedEnum)]
-enum UntaggedEnum {
-    Foo(u32),
-    Bar(String),
-}
-
-#[rustler::nif(name = "add")]
-fn add_nif(a: i64, b: i64) -> i64 {
-    add(a, b)
-}
-
-fn add(a: i64, b: i64) -> i64 {
-    a + b
-}
-
-#[rustler::nif(name = "my_map")]
-fn my_map_nif() -> MyMap {
-    my_map()
-}
-
-#[rustler::nif]
-fn my_maps() -> Vec<MyMap> {
-    vec![ my_map(), my_map()]
-}
-
-fn my_map() -> MyMap {
-    MyMap { lhs: 33, rhs: 21 }
-}
-
-#[rustler::nif]
-fn my_string(val: String) -> String {
-    val
-}
-
-#[rustler::nif]
-fn my_tuple() -> MyTuple {
-    MyTuple { lhs: 33, rhs: 21 }
-}
-
-#[rustler::nif]
-fn my_list() -> Vec<f64> {
-    vec![1.0, 3.0]
-}
-
-#[rustler::nif]
-fn unit_enum_echo(unit_enum: UnitEnum) -> UnitEnum {
-    unit_enum
-}
-
-#[rustler::nif]
-fn tagged_enum_echo(tagged_enum: TaggedEnum) -> TaggedEnum {
-    tagged_enum
-}
-
-#[rustler::nif]
-fn untagged_enum_echo(untagged_enum: UntaggedEnum) -> UntaggedEnum {
-    untagged_enum
 }
 
 
 
-#[cfg(test)]
-mod tests {
-    use crate::add;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+
+// =============================================================================
+// UTILS
+// =============================================================================
+
+
+
+
+

@@ -2,9 +2,8 @@
 
 -export([new/2]).
 -export([new/3]).
-%% -export([run_script/2]).
--export([run_script_json/2]).
--export([run_script/3]).
+-export([run/2]).
+-export([run/3]).
 -export([debug_run_script/2]).
 
 -export([test_1/0]).
@@ -12,6 +11,7 @@
 
 -export([ add/2
         , my_map/0
+        , my_map2/0
         , my_list/0
         , my_maps/0
         , my_string/1
@@ -55,27 +55,72 @@ new(Engine, Path, Opts) ->
 %% r2[] <- [[2, 'B'], [3, 'C']]
 %% ?[v1, v2] := r1[k1, v1], r2[k1, v2]
 
-run_script(Db, Script) ->
-    ?NOT_LOADED.
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+run(Db, Script) when is_list(Script) ->
+    run(Db, list_to_binary(Script));
+
+run(Db, Script) when is_binary(Script) ->
+    run_script(Db, Script).
 
 
-run_script(Db, Script, #{return := json} = Opts) when is_map(Opts) ->
-    run_script_json(Db, Script, Opts);
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+run(Db, Script, Opts) when is_list(Script) ->
+    run(Db, list_to_binary(Script), Opts);
 
-run_script(Db, Script, Opts) when is_map(Opts) ->
+run(Db, Script, #{return := json} = Opts) when is_binary(Script) ->
+    run_script_json(Db, Script);
+
+run(Db, Script, Opts) when is_binary(Script), is_map(Opts) ->
     run_script(Db, Script).
 
 
 
+debug_run_script(Db, Script) ->
+    ?NOT_LOADED.
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+run_script(Db, Script) ->
+    ?NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 run_script_json(Db, Script) ->
     ?NOT_LOADED.
 
-run_script_json(Db, Script, Opts) when is_map(Opts) ->
-    run_script_json(Db, Script).
 
 
-debug_run_script(Db, Script) ->
-    ?NOT_LOADED.
+
+
+
+%% =============================================================================
+%% EXAMPLES
+%% =============================================================================
+
+
 
 
 
@@ -95,6 +140,9 @@ add(_A, _B) ->
     ?NOT_LOADED.
 
 my_map() ->
+    ?NOT_LOADED.
+
+my_map2() ->
     ?NOT_LOADED.
 
 my_list() ->

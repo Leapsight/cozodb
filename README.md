@@ -1,4 +1,4 @@
-ecozodb
+cozodb
 =====
 
 Erlang experiments with Rustler

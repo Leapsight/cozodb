@@ -1,6 +1,6 @@
 -cargo_header_version 1.
 -ifndef(CARGO_LOAD_APP).
--define(CARGO_LOAD_APP,ecozodb).
+-define(CARGO_LOAD_APP,cozodb).
 -endif.
 -ifndef(CARGO_HRL).
 -define(CARGO_HRL, 1).

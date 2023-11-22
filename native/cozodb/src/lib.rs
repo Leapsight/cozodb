@@ -33,7 +33,7 @@ mod atoms {
 
 
 // INIT
-rustler::init!("ecozodb",
+rustler::init!("cozodb",
     [
       new,
       run_script,

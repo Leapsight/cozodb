@@ -1,4 +1,4 @@
--module(ecozodb).
+-module(cozodb).
 
 -export([new/2]).
 -export([new/3]).
@@ -126,8 +126,8 @@ run_script_json(Db, Script) ->
 
 test_1() ->
     Q = <<"r1[] <- [[1, 'a'], [2, 'b']]\nr2[] <- [[2, 'B'], [3, 'C']]\n?[v1, v2] := r1[k1, v1], r2[k1, v2]">>,
-    Ref = ecozodb:new(mem, <<>>, <<>>),
-    ecozodb:run_script_json(Ref, Q).
+    Ref = cozodb:new(mem, <<>>, <<>>),
+    cozodb:run_script_json(Ref, Q).
 
 
 rows_1() ->
@@ -177,7 +177,7 @@ untagged_enum_echo(_Untagged) ->
 
 
 init() ->
-    ?load_nif_from_crate(ecozodb, 0).
+    ?load_nif_from_crate(cozodb, 0).
 
 not_loaded(Line) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).

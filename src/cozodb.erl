@@ -1,31 +1,26 @@
 -module(cozodb).
 
--export([new/2]).
--export([new/3]).
+-include("cargo.hrl").
+-include_lib("kernel/include/logger.hrl").
+
+
+-define(APP, cozodb).
+-define(NIF_NOT_LOADED,
+    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]})
+).
+
+-type engine()          :: mem | sqlite | rocksdb.
+-type db_opts()         :: map().
+-type query_opts()      :: #{
+                                encoding => json | undefined                        }.
+-export([open/0]).
+-export([open/1]).
+-export([open/2]).
+-export([open/3]).
 -export([run/2]).
 -export([run/3]).
--export([debug_run_script/2]).
 
--export([test_1/0]).
--export([rows_1/0]).
-
--export([ add/2
-        , my_map/0
-        , my_map2/0
-        , my_list/0
-        , my_maps/0
-        , my_string/1
-        , my_tuple/0
-        , unit_enum_echo/1
-        , tagged_enum_echo/1
-        , untagged_enum_echo/1
-        ]).
-
--type engine() :: mem | sqlite | rocksdb | sled | tikv.
-
--include("cargo.hrl").
 -on_load(init/0).
--define(NOT_LOADED, not_loaded(?LINE)).
 
 
 
@@ -33,27 +28,75 @@
 %% API
 %% =============================================================================
 
--spec new(Engine :: engine(), Path :: list()) -> reference().
-
-new(Engine, []) ->
-    new(Engine, <<>>, <<>>).
 
 
-%% =============================================================================
-%% API
-%% =============================================================================
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec open() -> reference().
 
--spec new(Engine :: engine(), Path :: list(), Opts :: term()) -> reference().
+open() ->
+    Engine = application:get_env(?APP, engine, mem),
+    open(Engine).
 
-new(Engine, [], Opts) ->
-    new(Engine, <<>>, Opts);
 
-new(Engine, Path, Opts) ->
-    ?NOT_LOADED.
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec open(Engine :: engine()) -> reference().
 
-%% r1[] <- [[1, 'a'], [2, 'b']]
-%% r2[] <- [[2, 'B'], [3, 'C']]
-%% ?[v1, v2] := r1[k1, v1], r2[k1, v2]
+open(Engine) ->
+    DataDir = application:get_env(?APP, data_dir, "/tmp"),
+    Path = filename:join([DataDir, "db"]),
+    open(Engine, Path).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec open(
+    Engine :: engine(), Path :: filename:filename()) -> reference().
+
+open(Engine, Path) when is_list(Path), Path =/= [] ->
+    Opts = case Engine of
+        sqlite ->
+            application:get_env(?APP, sqlite_options, #{});
+        rocksdb ->
+            application:get_env(?APP, rocksdb_options, #{});
+        _ ->
+            #{}
+    end,
+    open(Engine, Path, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec open(
+    Engine :: engine(), Path :: filename:filename(), Opts :: db_opts()) ->
+    {ok, reference()} | {error, any()}.
+
+open(Engine, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
+    %% Call NIF
+    try
+        new(Engine, list_to_binary(Path), encode_db_opts(Opts))
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end;
+
+open(_, _, _) ->
+    error(badarg).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -73,7 +116,7 @@ run(Db, Script) when is_binary(Script) ->
 run(Db, Script, Opts) when is_list(Script) ->
     run(Db, list_to_binary(Script), Opts);
 
-run(Db, Script, #{return := json} = Opts) when is_binary(Script) ->
+run(Db, Script, #{format := json} = Opts) when is_binary(Script) ->
     run_script_json(Db, Script);
 
 run(Db, Script, Opts) when is_binary(Script), is_map(Opts) ->
@@ -81,108 +124,82 @@ run(Db, Script, Opts) when is_binary(Script), is_map(Opts) ->
 
 
 
-debug_run_script(Db, Script) ->
-    ?NOT_LOADED.
-
-
-
-
 
 %% =============================================================================
-%% PRIVATE
+%% PRIVATE: NIFs
 %% =============================================================================
 
 
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
+%% @doc Called by on_load directive
+%% @end
+%% -----------------------------------------------------------------------------
+init() ->
+    Crate = ?APP,
+    ?load_nif_from_crate(Crate, 0).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Calls native/cozodb/src/lib.rs::new
+%% @end
+%% -----------------------------------------------------------------------------
+new(Engine, Path, Opts) ->
+    ?NIF_NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Calls native/cozodb/src/lib.rs::run_script
 %% @end
 %% -----------------------------------------------------------------------------
 run_script(Db, Script) ->
-    ?NOT_LOADED.
+    ?NIF_NOT_LOADED.
 
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
+%% @doc Calls native/cozodb/src/lib.rs::run_script_json
 %% @end
 %% -----------------------------------------------------------------------------
 run_script_json(Db, Script) ->
-    ?NOT_LOADED.
-
+    ?NIF_NOT_LOADED.
 
 
 
 
 
 %% =============================================================================
-%% EXAMPLES
+%% PRIVATE: UTILS
 %% =============================================================================
 
+-spec encode_db_opts(Opts :: db_opts()) -> list().
+
+encode_db_opts(Opts) when is_map(Opts) ->
+    Encoder = json_encoder(),
+    Encoder:encode(Opts).
 
 
+%%--------------------------------------------------------------------
+%% @doc returns the default json encoder (thoas)
+%% @end
+%%--------------------------------------------------------------------
+-spec json_encoder() -> atom().
+
+json_encoder() ->
+    application:get_env(?APP, json_parser, thoas).
 
 
-test_1() ->
-    Q = <<"r1[] <- [[1, 'a'], [2, 'b']]\nr2[] <- [[2, 'B'], [3, 'C']]\n?[v1, v2] := r1[k1, v1], r2[k1, v2]">>,
-    Ref = cozodb:new(mem, <<>>, <<>>),
-    cozodb:run_script_json(Ref, Q).
+%%--------------------------------------------------------------------
+%% @doc returns the default json decoder (thoas)
+%% @end
+%%--------------------------------------------------------------------
+-spec json_decoder() -> atom().
 
-
-rows_1() ->
-    ?NOT_LOADED.
-
-
-%%
-
-add(_A, _B) ->
-    ?NOT_LOADED.
-
-my_map() ->
-    ?NOT_LOADED.
-
-my_map2() ->
-    ?NOT_LOADED.
-
-my_list() ->
-    ?NOT_LOADED.
-
-my_maps() ->
-    ?NOT_LOADED.
-
-my_string(Value) ->
-    ?NOT_LOADED.
-
-my_tuple() ->
-    ?NOT_LOADED.
-
-unit_enum_echo(_Atom) ->
-    ?NOT_LOADED.
-
-tagged_enum_echo(_Tagged) ->
-    ?NOT_LOADED.
-
-untagged_enum_echo(_Untagged) ->
-    ?NOT_LOADED.
-
-
-
-
-%% =============================================================================
-%% NIF
-%% =============================================================================
-
-
-
-
-init() ->
-    ?load_nif_from_crate(cozodb, 0).
-
-not_loaded(Line) ->
-    erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).
-
-
+json_decoder() ->
+    application:get_env(?APP, json_parser, thoas).
 
 
 

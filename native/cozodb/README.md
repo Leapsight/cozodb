@@ -1,4 +1,4 @@
-# NIF for cozodb
+# Erlang NIF for Cozodb
 
 ## To compile the NIF in Erlang:
 

@@ -37,8 +37,7 @@ rustler::init!("cozodb",
     [
       new,
       run_script,
-      run_script_json,
-      debug_run_script
+      run_script_json
     ],
     load = on_load
 );
@@ -187,17 +186,15 @@ impl<'a> Encoder for Array64Wrapper {
 
 
 /// Returns a new cozo engine
-#[rustler::nif(schedule = "DirtyCpu")]
+#[rustler::nif(schedule = "DirtyIo")]
 fn new<'a>(env: Env<'a>, engine: Term, path: String, _options:&str) ->
     Result<Term<'a>, Error> {
     let engine_str = engine.atom_to_string().unwrap();
-            let db = DbInstance::new(
+    let db = DbInstance::new(
         &engine_str,
         path.to_string(),
         Default::default()).unwrap();
-    let resource = ResourceArc::new(DbResource {
-        db: db
-    });
+    let resource = ResourceArc::new(DbResource {db: db});
     Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
 }
 
@@ -258,18 +255,6 @@ fn run_script_json<'a>(
     }
 
 }
-
-#[rustler::nif(schedule = "DirtyIo")]
-fn debug_run_script(resource: ResourceArc<DbResource>, script: String)
- {
-    let result = resource.db.run_script(
-        &script,
-        Default::default(),
-        ScriptMutability::Immutable
-    ).unwrap();
-    println!("{:?}", result);
-}
-
 
 
 

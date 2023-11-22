@@ -6,9 +6,10 @@ lto = true
 
 
 [package]
-name = "cozodb"
+name = "erlang-cozodb"
 version = "0.1.0"
 edition = "2021"
+description = "Erlang bindings for CozoDB"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,3 +24,12 @@ cozo = "0.7.5"
 ndarray = "0.15.6"
 uuid = "1.3.3"
 serde_json = "1.0.96"
+
+[features]
+default = [
+    # "cozo/jemalloc", # jemalloc as the global allocator for perf
+    "cozo/storage-sqlite",
+    "cozo/storage-rocksdb",
+    "cozo/io-uring", # Enables io-uring option for the RocksDB storage
+    "cozo/graph-algo"
+]

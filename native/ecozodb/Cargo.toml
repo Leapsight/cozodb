@@ -1,5 +1,5 @@
 [profile.release]
-# lto = true
+lto = true
 
 # [target.'cfg(target_arch = "x86_64")'.rustflags]
 # flags = ["-C", "target-feature=+avx2"]

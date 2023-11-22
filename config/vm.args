@@ -1,0 +1,22 @@
+## -----------------------------------------------------------------------------
+## Distributed Erlang
+## -----------------------------------------------------------------------------
+
+## Name of the node
+-name cozo@127.0.0.1
+
+## Cookie for distributed erlang
+-setcookie cozo
+
+## Increase distribution port buffer size.
++zdbbl 32768
+
+## -----------------------------------------------------------------------------
+## Erlang
+## -----------------------------------------------------------------------------
+
+## Enable multi_time_warp
++C multi_time_warp
+
+## Dirty IO Scheduler Threads
++SDio 16

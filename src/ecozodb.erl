@@ -196,29 +196,5 @@ not_loaded(Line) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-add_test() ->
-    ?assertEqual(4, add(2, 2)).
-
-my_map_test() ->
-    ?assertEqual(#{lhs => 33, rhs => 21}, my_map()).
-
-my_maps_test() ->
-    ?assertEqual([#{lhs => 33, rhs => 21}, #{lhs => 33, rhs => 21}], my_maps()).
-
-my_tuple_test() ->
-    ?assertEqual({33, 21}, my_tuple()).
-
-unit_enum_echo_test() ->
-    ?assertEqual(foo_bar, unit_enum_echo(foo_bar)),
-    ?assertEqual(baz, unit_enum_echo(baz)).
-
-tagged_enum_echo_test() ->
-    ?assertEqual(foo, tagged_enum_echo(foo)),
-    ?assertEqual({bar, <<"string">>}, tagged_enum_echo({bar, <<"string">>})),
-    ?assertEqual({baz,#{a => 1, b => 2}}, tagged_enum_echo({baz,#{a => 1, b => 2}})).
-
-untagged_enum_echo_test() ->
-    ?assertEqual(123, untagged_enum_echo(123)),
-    ?assertEqual(<<"string">>, untagged_enum_echo(<<"string">>)).
 
 -endif.

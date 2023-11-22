@@ -1,4 +1,4 @@
-# NIF for ecozodb
+# NIF for cozodb
 
 ## To compile the NIF in Erlang:
 
@@ -7,7 +7,7 @@ Add the following lines to your `rebar.config` file:
 {plugins, [rebar3_rustler]}.
 
 {cargo_opts, [
-    {src_dir, "native/ecozodb"}
+    {src_dir, "native/cozodb"}
 ]}.
 
 {provider_hooks, [

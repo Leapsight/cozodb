@@ -30,13 +30,13 @@
 %%% @copyright 2023 Mathieu Kerjouan
 %%% @author Mathieu Kerjouan
 %%%===================================================================
--module(ecozodb_SUITE).
+-module(cozodb_SUITE).
 -compile(export_all).
 -include_lib("common_test/include/ct.hrl").
-%% -include("ecozodb.hrl").
--include("ecozodb_test.hrl").
--define(DB_PATH_TEST, "/tmp/ecozodb_test").
--define(DB_PREFIX, "ecozodb_test_SUITE").
+%% -include("cozodb.hrl").
+-include("cozodb_test.hrl").
+-define(DB_PATH_TEST, "/tmp/cozodb_test").
+-define(DB_PREFIX, "cozodb_test_SUITE").
 -define(MODULE_TEST, cozo).
 
 %%--------------------------------------------------------------------
@@ -52,8 +52,8 @@ suite() -> [{timetrap,{seconds,30}}].
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    ok = application:set_env(ecozodb, db_path, ?DB_PATH_TEST),
-    ok = application:set_env(ecozodb, db_filename_prefix, ?DB_PREFIX),
+    ok = application:set_env(cozodb, db_path, ?DB_PATH_TEST),
+    ok = application:set_env(cozodb, db_filename_prefix, ?DB_PREFIX),
     case proplists:get_value(create_path, Config, true) of
         true -> 
             ok = file:make_dir(?DB_PATH_TEST);
@@ -152,41 +152,41 @@ simple() -> [].
 
 simple(_Config) ->
     % open a new database
-    {ok, Db} = ecozodb:new(mem, []),
+    {ok, Db} = cozodb:new(mem, []),
 
     % query using string
-    % {ok, _} = ecozodb:run(Db, "?[] <- [[1, 2, 3]]"),
-    {ok, _} = ecozodb:run(Db, "?[] <- [[1, 2, 3]]"),
+    % {ok, _} = cozodb:run(Db, "?[] <- [[1, 2, 3]]"),
+    {ok, _} = cozodb:run(Db, "?[] <- [[1, 2, 3]]"),
 
     % query using binary
-    {ok, _} = ecozodb:run(Db, <<"?[] <- [[1, 2, 3]]">>),
+    {ok, _} = cozodb:run(Db, <<"?[] <- [[1, 2, 3]]">>),
 
     % query using a list of string
-    {ok, _} = ecozodb:run(Db, ["?[] <- [[1, 2, 3]]"]),
+    {ok, _} = cozodb:run(Db, ["?[] <- [[1, 2, 3]]"]),
 
     % wrong term used for queries
-    {error, _} = ecozodb:run(Db, query),
-    {error, _} = ecozodb:run(Db, ""),
-    {error, _} = ecozodb:run(Db, "", ""),
+    {error, _} = cozodb:run(Db, query),
+    {error, _} = cozodb:run(Db, ""),
+    {error, _} = cozodb:run(Db, "", ""),
 
     % close database
-    ok = ecozodb:close(Db),
+    ok = cozodb:close(Db),
 
     % wrong engine
-    {error, {bad_engine, _}} = ecozodb:open(test),
+    {error, {bad_engine, _}} = cozodb:open(test),
 
     % not existing path
     % does not work correctly on github workflow
-    % {error, _} = ecozodb:open(mem, "/not/existing/path"),
+    % {error, _} = cozodb:open(mem, "/not/existing/path"),
 
     % bad path
-    {error, _} = ecozodb:open(mem, a_wrong_path),
+    {error, _} = cozodb:open(mem, a_wrong_path),
 
     % bad configuration provided
-    {error, _} = ecozodb:open(mem, "/tmp", "bad"),
+    {error, _} = cozodb:open(mem, "/tmp", "bad"),
 
     % close an already closed database
-    {error, _} = ecozodb:close(Db).
+    {error, _} = cozodb:close(Db).
 
 %%--------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#First-steps
@@ -884,7 +884,7 @@ hnsw_fun({Module, Engine}) ->
                                  "keep_pruned_connections: false, "
                                  "}"),
     % @todo: fix crash
-    % {ok, _} = ecozodb:delete_hnsw(Db, "table:index_name"),
+    % {ok, _} = cozodb:delete_hnsw(Db, "table:index_name"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------
@@ -913,7 +913,7 @@ lsh_fun({Module, Engine}) ->
                                 "false_negative_weight: 1.0, "
                                 "}"),
     % @todo: fix crash
-    % {ok, _} = ecozodb:delete_lsh(Db, "table:index_table"),
+    % {ok, _} = cozodb:delete_lsh(Db, "table:index_table"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------
@@ -937,7 +937,7 @@ fts_fun({Module, Engine}) ->
                                 "filters: [AlphaNumOnly], "
                                 "}"),
     % @todo: fix crash
-    % {ok, _} = ecozodb:delete_fts(Db, "table:index_name"),
+    % {ok, _} = cozodb:delete_fts(Db, "table:index_name"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------
@@ -954,8 +954,8 @@ multi_spawn(_Config) ->
     ].
 
 cozo_spawn(Counter) ->
-  Open = fun() -> {ok, Db} = ecozodb:open(), Db end,
+  Open = fun() -> {ok, Db} = cozodb:open(), Db end,
   Dbs = [ Open() || _ <- lists:seq(1, Counter) ],
   Run = fun(Db) -> spawn(cozo, run, [Db, "?[] <- [[1, 2, 3]]"]) end,
   [ Run(Db) || Db <- Dbs ],
-  [ ecozodb:close(Db) || Db <- Dbs ].
+  [ cozodb:close(Db) || Db <- Dbs ].

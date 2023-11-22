@@ -1,5 +1,5 @@
 {application, cozodb,
- [{description, "An OTP library"},
+ [{description, "Erlang wrapper for CozoDB."},
   {vsn, "0.1.0"},
   {registered, []},
   {applications,

@@ -1,4 +1,21 @@
-// use serde_rustler::to_term;
+// =============================================================================
+// cozodb.erl -
+//
+// Copyright (c) 2020 Leapsight Holdings Limited. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// =============================================================================
+
 use rustler::NifResult;
 use rustler::Env;
 use rustler::Error;
@@ -15,7 +32,6 @@ use ndarray::Array1; // used by cozo
 // =============================================================================
 
 
-
 // We define atoms in Rustler
 mod atoms {
     rustler::atoms! {
@@ -26,8 +42,7 @@ mod atoms {
         mem,
         sqlite,
         rocksdb,
-        sled,
-        tikv
+        invalid_engine
     }
 }
 
@@ -105,8 +120,7 @@ impl<'a> Encoder for DataValueWrapper {
             DataValue::Uuid(w) => w.0.hyphenated().to_string().encode(env),
             DataValue::List(i) => {
                 let encoded_values: Vec<Term<'b>> = i
-                    .iter()
-                    .map(|val| DataValueWrapper(val.clone()).encode(env))
+                    .iter()                    .map(|val| DataValueWrapper(val.clone()).encode(env))
                     .collect();
 
                 encoded_values.encode(env)
@@ -127,13 +141,16 @@ impl<'a> Encoder for DataValueWrapper {
                 (ts, assert).encode(env)
             },
             DataValue::Regex(_) | DataValue::Set(_) | DataValue::Bot =>
-                // this will never get called as they are only used internally
-                // but if they do we just return
-                "ignored".to_string().encode(env)
+                // This types are only used internally so we shoul never receive
+                // one of this as a result of running a script, but we match
+                // them to avoid a compiler error.
+                // Just in case we do get them, we return the atom 'nil'
+                atoms::nil().encode(env)
         }
     }
 }
 
+/// Wrapper required to serialise Num value as Erlang Term
 struct NumWrapper(Num);
 
 impl<'a> Encoder for NumWrapper {
@@ -145,6 +162,7 @@ impl<'a> Encoder for NumWrapper {
     }
 }
 
+/// Wrapper required to serialise Vector value as Erlang Term
 struct VectorWrapper(Vector);
 
 impl<'a> Encoder for VectorWrapper {
@@ -156,6 +174,8 @@ impl<'a> Encoder for VectorWrapper {
     }
 }
 
+
+/// Wrapper required to serialise Vector value as Erlang Term
 struct Array32Wrapper(Array1<f32>);  // Used by Vector
 
 impl<'a> Encoder for Array32Wrapper {
@@ -167,14 +187,14 @@ impl<'a> Encoder for Array32Wrapper {
     }
 }
 
+/// Wrapper required to serialise Vector value as Erlang Term
 struct Array64Wrapper(Array1<f64>);  // Used by Vector
 
 impl<'a> Encoder for Array64Wrapper {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
         // Convert ndarray::Array1 to a Vec<f64>
         let vec: Vec<f64> = self.0.to_vec();
-        // Encode the Vec<f64> as an Elixir list
-        vec.encode(env)
+        // Encode the Vec<f64> as an Elixir list        vec.encode(env)
     }
 }
 

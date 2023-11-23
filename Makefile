@@ -34,5 +34,5 @@ test:
 test-all:
 	@$(REBAR3) do eunit, ct, cover
 
-release: test
+release:
 	@$(REBAR3) as prod release

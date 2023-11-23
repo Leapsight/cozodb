@@ -1,24 +1,50 @@
+%% =============================================================================
+%%  cozodb.erl -
+%%
+%%  Copyright (c) 2020 Leapsight Holdings Limited. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(cozodb).
 
 -include("cargo.hrl").
 -include_lib("kernel/include/logger.hrl").
-
 
 -define(APP, cozodb).
 -define(NIF_NOT_LOADED,
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]})
 ).
 
--type engine()          :: mem | sqlite | rocksdb.
--type db_opts()         :: map().
--type query_opts()      :: #{
+-type engine()          ::  mem | sqlite | rocksdb.
+-type path()            ::  filename:filename().
+-type db_opts()         ::  map().
+-type query_opts()      ::  #{
                                 encoding => json | undefined                        }.
+
+
 -export([open/0]).
 -export([open/1]).
 -export([open/2]).
 -export([open/3]).
+-export([close/1]).
 -export([run/2]).
 -export([run/3]).
+
 
 -on_load(init/0).
 
@@ -34,7 +60,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec open() -> reference().
+-spec open() -> {ok, reference()} | {error, Reason :: any()}.
 
 open() ->
     Engine = application:get_env(?APP, engine, mem),
@@ -45,7 +71,7 @@ open() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(Engine :: engine()) -> reference().
+-spec open(Engine :: engine()) -> {ok, reference()} | {error, Reason :: any()}.
 
 open(Engine) ->
     DataDir = application:get_env(?APP, data_dir, "/tmp"),
@@ -57,56 +83,61 @@ open(Engine) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(
-    Engine :: engine(), Path :: filename:filename()) -> reference().
+-spec open(Engine :: engine(), Path :: path()) ->
+    {ok, reference()} | {error, Reason :: any()}.
 
-open(Engine, Path) when is_list(Path), Path =/= [] ->
-    Opts = case Engine of
-        sqlite ->
-            application:get_env(?APP, sqlite_options, #{});
-        rocksdb ->
-            application:get_env(?APP, rocksdb_options, #{});
-        _ ->
-            #{}
-    end,
-    open(Engine, Path, Opts).
+open(mem, Path) when is_list(Path), Path =/= [] ->
+    open(mem, Path, #{});
+
+open(rocksdb, Path) when is_list(Path), Path =/= [] ->
+    Opts = application:get_env(?APP, rocksdb_options, #{}),
+    open(rocksdb, Path, Opts);
+
+open(sqlite, Path) when is_list(Path), Path =/= [] ->
+    Opts = application:get_env(?APP, sqlite_options, #{}),
+    open(sqlite, Path, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% `Path' is ignored when `Engine' is `mem'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec open(Engine :: engine(), Path :: path(), Opts :: db_opts()) ->
+    {ok, reference()} | {error, Reason :: any()}.
+
+open(mem, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
+    do_open(<<"mem">>, list_to_binary(Path), encode_db_opts(Opts));
+
+open(rocksdb, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
+    do_open(<<"rocksdb">>, list_to_binary(Path), encode_db_opts(Opts));
+
+open(sqlite, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
+    do_open(<<"sqlite">>, list_to_binary(Path), encode_db_opts(Opts)).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(
-    Engine :: engine(), Path :: filename:filename(), Opts :: db_opts()) ->
-    {ok, reference()} | {error, any()}.
+-spec close(DbRef :: reference()) -> return.
 
-open(Engine, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
-    %% Call NIF
-    try
-        new(Engine, list_to_binary(Path), encode_db_opts(Opts))
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end;
+close(DbRef) ->
+    ?NIF_NOT_LOADED.
 
-open(_, _, _) ->
-    error(badarg).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-run(Db, Script) when is_list(Script) ->
-    run(Db, list_to_binary(Script));
+-spec run(DbRef :: reference(), Script :: list()) -> any().
 
-run(Db, Script) when is_binary(Script) ->
-    run_script(Db, Script).
+run(DbRef, Script) when is_list(Script) ->
+    run(DbRef, list_to_binary(Script));
+
+run(DbRef, Script) when is_binary(Script) ->
+    run_script(DbRef, Script).
 
 
 %% -----------------------------------------------------------------------------
@@ -146,6 +177,9 @@ init() ->
 %% @doc Calls native/cozodb/src/lib.rs::new
 %% @end
 %% -----------------------------------------------------------------------------
+-spec new(Engine :: binary(), Path :: binary(), Opts :: binary()) ->
+    {ok, reference()} | {error, Reason :: any()}.
+
 new(Engine, Path, Opts) ->
     ?NIF_NOT_LOADED.
 
@@ -155,6 +189,9 @@ new(Engine, Path, Opts) ->
 %% @doc Calls native/cozodb/src/lib.rs::run_script
 %% @end
 %% -----------------------------------------------------------------------------
+-spec run_script(DbRef :: engine(), Script :: binary()) ->
+    {ok, Headers :: [binary()], Rows :: [list()]}.
+
 run_script(Db, Script) ->
     ?NIF_NOT_LOADED.
 
@@ -175,6 +212,26 @@ run_script_json(Db, Script) ->
 %% PRIVATE: UTILS
 %% =============================================================================
 
+
+
+%% @private
+do_open(Engine, Path, Opts)
+when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
+    try
+        %% Call NIF
+        new(Engine, Path, Opts)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end.
+
+
+%% @private
 -spec encode_db_opts(Opts :: db_opts()) -> list().
 
 encode_db_opts(Opts) when is_map(Opts) ->

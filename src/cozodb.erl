@@ -45,7 +45,7 @@
                                 next := [list()] | undefined
                             }.
 -type engine()          ::  mem | sqlite | rocksdb.
--type path()            ::  filename:filename().
+-type path()            ::  filename:filename() | binary().
 -type db_opts()         ::  map().
 -type query_opts()      ::  #{
                                 return_type => json | record | map,
@@ -89,12 +89,11 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% The database will automatically be closed when the BEAM VM releases it for
-%% garbage collection.
+%% @doc Opens
 %% @end
 %% -----------------------------------------------------------------------------
--spec open() -> {ok, reference()} | {error, Reason :: any()}.
+-spec open() ->
+    {ok, reference()} | {error, Reason :: any()} | no_return().
 
 open() ->
     Engine = application:get_env(?APP, engine, mem),
@@ -105,7 +104,8 @@ open() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(Engine :: engine()) -> {ok, reference()} | {error, Reason :: any()}.
+-spec open(Engine :: engine()) ->
+    {ok, reference()} | {error, Reason :: any()} | no_return().
 
 open(Engine) ->
     DataDir = application:get_env(?APP, data_dir, "/tmp"),
@@ -118,46 +118,46 @@ open(Engine) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open(Engine :: engine(), Path :: path()) ->
-    {ok, reference()} | {error, Reason :: any()}.
+    {ok, reference()} | {error, Reason :: any()} | no_return().
 
-open(mem, Path) when is_list(Path), Path =/= [] ->
-    open(mem, Path, #{});
-
-open(rocksdb, Path) when is_list(Path), Path =/= [] ->
-    Opts = application:get_env(?APP, rocksdb_options, #{}),
-    open(rocksdb, Path, Opts);
-
-open(sqlite, Path) when is_list(Path), Path =/= [] ->
-    Opts = application:get_env(?APP, sqlite_options, #{}),
-    open(sqlite, Path, Opts);
-
-open(Engine, Path) when is_atom(Engine), is_list(Path) ->
-    ?ERROR(badarg, [Engine, Path], #{
-        1 => "engine is not valid. Valid engines are mem, rocksdb and sqlite"
-    }).
+open(Engine, Path) ->
+    open(Engine, Path, engine_opts(Engine)).
 
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Creates or opens an existing database.
 %% `Path' is ignored when `Engine' is `mem'.
+%% The database has to be explicitely closed using {@link close/1} for Erlang
+%% to release the allocated ErlNIF resources.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open(Engine :: engine(), Path :: path(), Opts :: db_opts()) ->
-    {ok, reference()} | {error, Reason :: any()}.
+    {ok, reference()} | {error, Reason :: any()} | no_return().
 
-open(mem, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
-    do_open(<<"mem">>, list_to_binary(Path), encode_map(Opts));
+open(Engine, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
+    open(Engine, list_to_binary(Path), Opts);
 
-open(rocksdb, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
-    do_open(<<"rocksdb">>, list_to_binary(Path), encode_map(Opts));
+open(Engine, Path, Opts)
+when is_atom(Engine), is_binary(Path), is_map(Opts) ->
+    Engine == mem orelse Engine == sqlite orelse Engine == rocksdb orelse
+        ?ERROR(badarg, [Engine, Path, Opts], #{
+            1 => "the value must be the atom 'mem', 'rocksdb' or 'sqlite'"
+        }),
 
-open(sqlite, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
-    do_open(<<"sqlite">>, list_to_binary(Path), encode_map(Opts)).
+    Path =/= <<>> orelse
+        ?ERROR(badarg, [Engine, Path, Opts], #{
+            2 => "a nonempty string or binary"
+        }),
+
+    do_open(atom_to_binary(Engine), Path, encode_map(Opts)).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Closes the database.
+%% Notice that the call is asyncronous and the database might take a while to
+%% close and a subsequent invocation to {@link open/3} with the same `path'
+%% might fail.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(DbRef :: reference()) -> ok | {error, Reason :: any()}.
@@ -317,6 +317,25 @@ when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
             }),
             {error, Reason}
     end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+engine_opts(mem) ->
+    #{};
+
+engine_opts(sqlite) ->
+    application:get_env(?APP, sqlite_options, #{});
+
+engine_opts(rocksdb) ->
+    application:get_env(?APP, rocksdb_options, #{});
+
+engine_opts(Other) ->
+    #{}.
 
 
 %% @private

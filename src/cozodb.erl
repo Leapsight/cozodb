@@ -90,6 +90,8 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% The database will automatically be closed when the BEAM VM releases it for
+%% garbage collection.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open() -> {ok, reference()} | {error, Reason :: any()}.
@@ -158,10 +160,9 @@ open(sqlite, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(DbRef :: reference()) -> ok | {error, any()}.
+-spec close(DbRef :: reference()) -> ok | {error, Reason :: any()}.
 
-close(DbRef) ->
-    %% {error, not_implemented}.
+close(_DbRef) ->
     ?NIF_NOT_LOADED.
 
 
@@ -240,7 +241,7 @@ init() ->
 -spec new(Engine :: binary(), Path :: binary(), Opts :: binary()) ->
     {ok, reference()} | {error, Reason :: any()}.
 
-new(Engine, Path, Opts) ->
+new(_Engine, _Path, _Opts) ->
     ?NIF_NOT_LOADED.
 
 
@@ -256,7 +257,7 @@ new(Engine, Path, Opts) ->
     Mutability :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script(Db, Script, Params, Mutability) ->
+run_script(_Db, _Script, _Params, _Mutability) ->
     ?NIF_NOT_LOADED.
 
 
@@ -272,7 +273,7 @@ run_script(Db, Script, Params, Mutability) ->
     Mutability :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_json(Db, Script, Params, Mutability) ->
+run_script_json(_Db, _Script, _Params, _Mutability) ->
     ?NIF_NOT_LOADED.
 
 
@@ -288,7 +289,7 @@ run_script_json(Db, Script, Params, Mutability) ->
     Mutability :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_str(Db, Script, Params, Mutability) ->
+run_script_str(_Db, _Script, _Params, _Mutability) ->
     ?NIF_NOT_LOADED.
 
 
@@ -340,10 +341,10 @@ json_encoder() ->
 %% @doc returns the default json decoder (thoas)
 %% @end
 %%--------------------------------------------------------------------
--spec json_decoder() -> atom().
+%% -spec json_decoder() -> atom().
 
-json_decoder() ->
-    application:get_env(?APP, json_parser, thoas).
+%% json_decoder() ->
+%%     application:get_env(?APP, json_parser, thoas).
 
 
 

@@ -27,6 +27,9 @@ use rustler::NifResult;
 use rustler::ResourceArc;
 use rustler::Term;
 
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Mutex;
+use lazy_static::lazy_static;
 
 
 // =============================================================================
@@ -65,20 +68,44 @@ rustler::init!("cozodb",
 );
 
 
-// Define NIF Resources
+/// Define NIF Resources using rustler::resource! macro
 fn on_load(env: Env, _: Term) -> bool {
     rustler::resource!(DbResource, env);
     true
 }
 
 
+
 // =============================================================================
 // STRUCTS REQUIRED FOR NIF
 // =============================================================================
 
-/// A NIF Resource representing the database instance
+
+
+/// Struct used to globally manage database handles
+/// This is combined with lazy_static!macro to create a static variable
+/// containing this struct.
+struct Handles {
+    current: AtomicI32, // thread safe counter
+    dbs: Mutex<BTreeMap<i32, DbInstance>>, // mapping of Id -> DbInstance handle
+}
+
+// Static instance of Handles
+// Static variables are allocated for the duration of a program's run and are
+// not specific to any thread.
+// lazy_static is used because Rust's standard library doesn't support static
+// variables with non-constant initializers directly. It lazily initializes the
+// variable on its first access.
+lazy_static! {
+    static ref HANDLES: Handles = Handles {
+        current: Default::default(), // sets current to 0
+        dbs: Mutex::new(Default::default()) // empty BTreeMap guarded by mutex
+    };
+}
+
+/// A NIF Resource representing the identifier for a DbInstance handle
 struct DbResource {
-    pub db: DbInstance
+    pub db_id: i32
 }
 
 /// Wrapper required to serialise NamedRows value as Erlang Term
@@ -95,10 +122,10 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
                     inner_vec.into_iter().map(DataValueWrapper).collect())
                 .collect();
         let next = match &self.0.next {
-            Some(more) => {
+            Some(more_ref) => {
                 // Dereference `more` before encoding
-                let dereferenced = &**more;
-                NamedRowsWrapper(dereferenced, 0.0).encode(env)
+                let more = &**more_ref;
+                NamedRowsWrapper(more, 0.0).encode(env)
             },
             None => atoms::undefined().encode(env)
         };
@@ -227,15 +254,20 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
     let result = DbInstance::new_with_str(engine, path.as_str(), options);
 
     let db = match result {
-        Ok(db) =>
-            db,
+        Ok(db) => {
+            db
+        },
         Err(err) =>
             // TODO catch error and pritty format
             // RocksDB error: IO error: lock hold by current process,
             return Err(rustler::Error::Term(Box::new(err.to_string())))
     };
 
-    let resource = ResourceArc::new(DbResource {db: db});
+    let id = HANDLES.current.fetch_add(1, Ordering::AcqRel);
+    let mut dbs = HANDLES.dbs.lock().unwrap();
+    dbs.insert(id, db);
+
+    let resource = ResourceArc::new(DbResource {db_id: id});
     Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
 }
 
@@ -245,8 +277,17 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
 
 fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
     NifResult<Term<'a>> {
-    drop(resource);
-    Ok(atoms::ok().encode(env))
+    let db = {
+        let mut dbs = HANDLES.dbs.lock().unwrap();
+        dbs.remove(&resource.db_id)
+    };
+    if db.is_some() {
+        Ok(atoms::ok().encode(env))
+    } else {
+        Err(rustler::Error::Term(
+            Box::new("Failed to close database".to_string())
+        ))
+    }
 }
 
 
@@ -261,6 +302,18 @@ fn run_script<'a>(
     mutability: Term
     ) -> NifResult<Term<'a>> {
 
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
     let mutability =
         if atoms::true_() == mutability {
             ScriptMutability::Mutable
@@ -269,14 +322,17 @@ fn run_script<'a>(
 
         };
 
-    let params_json = match params_to_btree(&params) {
-        Ok(value) => value,
-        Err(err) => return Err(rustler::Error::Term(Box::new(err.to_string())))
-    };
+    let params_json =
+        match params_to_btree(&params) {
+            Ok(value) => value,
+            Err(err) => return Err(rustler::Error::Term(
+                Box::new(err.to_string())
+            ))
+        };
 
     let start = Instant::now();
 
-    match resource.db.run_script(&script, params_json, mutability) {
+    match db.run_script(&script, params_json, mutability) {
         Ok(named_rows) => {
             let took = start.elapsed().as_secs_f64();
             let record = NamedRowsWrapper(&named_rows, took).encode(env);
@@ -299,6 +355,18 @@ fn run_script_json<'a>(
     mutability: Term
     ) -> NifResult<Term<'a>>  {
 
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
     let mutability =
         if atoms::true_() == mutability {
             ScriptMutability::Mutable
@@ -307,12 +375,15 @@ fn run_script_json<'a>(
 
         };
 
-    let params_json = match params_to_btree(&params) {
-        Ok(value) => value,
-        Err(err) => return Err(rustler::Error::Term(Box::new(err.to_string())))
-    };
+    let params_json =
+        match params_to_btree(&params) {
+            Ok(value) => value,
+            Err(err) => return Err(rustler::Error::Term(
+                Box::new(err.to_string())
+            ))
+        };
 
-    let result = resource.db.run_script(
+    let result = db.run_script(
         &script,
         params_json,
         mutability
@@ -338,12 +409,22 @@ fn run_script_str<'a>(
     params: String,
     mutability: Term
     ) -> NifResult<Term<'a>>  {
+    let db = match get_db(resource.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(
+                rustler::Error::Term(
+                    Box::new("invalid reference".to_string())
+                )
+            )
+        }
+    };
+
     let mutability = atoms::true_() == mutability;
-    let json_str = resource.db.run_script_str(&script, &params, mutability);
+    let json_str = db.run_script_str(&script, &params, mutability);
     let result = (atoms::ok().encode(env), json_str.encode(env));
     Ok(result.encode(env))
 }
-
 
 
 
@@ -369,3 +450,7 @@ fn params_to_btree(params: &String) ->
     }
 }
 
+fn get_db(db_id: i32) -> Option<DbInstance> {
+    let dbs = HANDLES.dbs.lock().unwrap();
+    dbs.get(&db_id).cloned()
+}

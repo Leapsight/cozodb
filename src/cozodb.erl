@@ -145,6 +145,7 @@
 -export([export/2]).
 -export([import/2]).
 -export([register_callback/2]).
+-export([unregister_callback/2]).
 %% -export([backup_db/2]).
 %% -export([restore_backup/2]).
 %% -export([import_from_backup/2]).
@@ -645,6 +646,19 @@ when is_reference(DbRef), is_binary(RelName)->
     register_callback_nif(DbRef, RelName).
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister_callback(DbRef :: reference(), Id :: integer()) ->
+    boolean().
+
+unregister_callback(DbRef, Id)
+when is_reference(DbRef), is_integer(Id)->
+    unregister_callback_nif(DbRef, Id).
+
+
 
 %% =============================================================================
 %% API: Utils
@@ -832,6 +846,18 @@ export_relations_json_nif(_DbRef, _Relations) ->
     ok.
 
 register_callback_nif(_DbRef, _RelName) ->
+    ?NIF_NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister_callback_nif(DbRef :: reference(), Id :: integer()) ->
+    ok.
+
+unregister_callback_nif(_DbRef, _Id) ->
     ?NIF_NOT_LOADED.
 
 

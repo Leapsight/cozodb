@@ -95,7 +95,8 @@ rustler::init!("cozodb",
       import_relations,
       export_relations,
       export_relations_json,
-      register_callback
+      register_callback,
+      unregister_callback
     ],
     load = on_load
 );
@@ -707,6 +708,69 @@ fn register_callback<'a>(
 }
 
 
+#[rustler::nif(schedule = "DirtyCpu", name = "unregister_callback_nif",)]
+
+fn unregister_callback<'a>(
+    env: Env<'a>,
+    resource: ResourceArc<DbResource>,
+    reg_id: u32) -> NifResult<Term<'a>>  {
+
+    // Get db handle and fail is invalid
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    let result: bool = db.unregister_callback(reg_id);
+
+    // We remove even if result == false
+    {
+        let mut regs = REGISTRATIONS.lock().unwrap();
+        regs.remove(&reg_id);
+    }
+
+    Ok(result.encode(env))
+}
+
+
+
+
+// =============================================================================
+// UTILS
+// =============================================================================
+
+
+
+fn get_db(db_id: i32) -> Option<DbInstance> {
+    let dbs = HANDLES.dbs.lock().unwrap();
+    dbs.get(&db_id).cloned()
+}
+
+
+fn params_to_btree(params: &String) ->
+    Result<BTreeMap<String, DataValue>, &'static str> {
+    if params.is_empty() {
+        Ok(BTreeMap::new()) // Wrap in Ok
+    } else {
+        match serde_json::from_str::<BTreeMap<String, DataValue>>(params) {
+            Ok(map) => Ok(
+                map.into_iter()
+                    .map(|(k, v)| (k, DataValue::from(v)))
+                    .collect()
+            ),
+            Err(_) => Err("params argument is not a JSON map")
+        }
+    }
+}
+
+
 fn worker_thread(
     registrations: Registrations, worker_count: usize, worker_index: usize) -> bool {
         loop {
@@ -776,35 +840,6 @@ fn handle_event(
             Err(_err) => env.error_tuple("failed".encode(env))
         }
     });
-}
-
-
-
-// =============================================================================
-// UTILS
-// =============================================================================
-
-
-
-fn params_to_btree(params: &String) ->
-    Result<BTreeMap<String, DataValue>, &'static str> {
-    if params.is_empty() {
-        Ok(BTreeMap::new()) // Wrap in Ok
-    } else {
-        match serde_json::from_str::<BTreeMap<String, DataValue>>(params) {
-            Ok(map) => Ok(
-                map.into_iter()
-                    .map(|(k, v)| (k, DataValue::from(v)))
-                    .collect()
-            ),
-            Err(_) => Err("params argument is not a JSON map")
-        }
-    }
-}
-
-fn get_db(db_id: i32) -> Option<DbInstance> {
-    let dbs = HANDLES.dbs.lock().unwrap();
-    dbs.get(&db_id).cloned()
 }
 
 

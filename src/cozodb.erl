@@ -379,7 +379,7 @@ export(Db, Relations) ->
     ok | {error, Reason :: any()}.
 
 export(Db, Relations, Opts) when is_reference(Db), is_map(Relations) ->
-    export(Db, map_to_json(Relations));
+    export(Db, map_to_json(Relations), Opts);
 
 export(Db, Relations, #{encoding := json})
 when is_reference(Db), is_binary(Relations) ->

@@ -16,20 +16,37 @@
 // limitations under the License.
 // =============================================================================
 
+use core::hash::Hash;
+use lazy_static::lazy_static;
 use std::collections::BTreeMap;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::Hasher;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
+
+// Used for CALLBACKS feature
+// use std::thread;
+use once_cell::sync::Lazy;
+use std::sync::Arc;
+use threadpool::ThreadPool;
+use crossbeam::channel::*;
+
 use cozo::*;
 use ndarray::Array1; // used by cozo
+
+
 
 use rustler::Encoder;
 use rustler::Env;
 use rustler::NifResult;
+use rustler::OwnedEnv;
 use rustler::ResourceArc;
 use rustler::Term;
+use rustler::types::Pid;
 
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Mutex;
-use lazy_static::lazy_static;
+
 
 
 // =============================================================================
@@ -47,7 +64,18 @@ mod atoms {
         false_ = "false",
         error,
         nil,
+        json,
         cozo_named_rows,
+        engine,
+        path,
+        rows,
+        headers,
+        next,
+        took,
+        updated,
+        removed,
+        cozodb,
+        relation,
         // Error Reasons
         badarg,
         invalid_engine
@@ -60,9 +88,14 @@ rustler::init!("cozodb",
     [
       new,
       close,
+      info,
       run_script,
       run_script_str,
-      run_script_json
+      run_script_json,
+      import_relations,
+      export_relations,
+      export_relations_json,
+      register_callback
     ],
     load = on_load
 );
@@ -75,11 +108,9 @@ fn on_load(env: Env, _: Term) -> bool {
 }
 
 
-
 // =============================================================================
 // STRUCTS REQUIRED FOR NIF
 // =============================================================================
-
 
 
 /// Struct used to globally manage database handles
@@ -90,26 +121,57 @@ struct Handles {
     dbs: Mutex<BTreeMap<i32, DbInstance>>, // mapping of Id -> DbInstance handle
 }
 
-// Static instance of Handles
+
+struct Registration {
+    receiver: Receiver<(CallbackOp, NamedRows, NamedRows)>,
+    relname: String,
+    pid: Pid
+}
+
+// id -> (channel, relname, pid)
+type Registrations = Arc<Mutex<HashMap<u32, Registration>>>;
+
+
 // Static variables are allocated for the duration of a program's run and are
 // not specific to any thread.
 // lazy_static is used because Rust's standard library doesn't support static
 // variables with non-constant initializers directly. It lazily initializes the
 // variable on its first access.
 lazy_static! {
-    static ref HANDLES: Handles = Handles {
-        current: Default::default(), // sets current to 0
-        dbs: Mutex::new(Default::default()) // empty BTreeMap guarded by mutex
-    };
+    // Required so that we can close a database from Erlang
+    static ref HANDLES: Handles =
+        Handles {
+            // sets current to 0
+            current: Default::default(),
+            // empty BTreeMap guarded by mutex
+            dbs: Mutex::new(Default::default())
+        };
+
+    static ref NUM_THREADS: usize = num_cpus::get();
+
+    // Required for Callback feature
+    static ref THREAD_POOL: Lazy<ThreadPool> =
+        Lazy::new(|| {
+            // Adjust the number of threads in the pool as needed from config
+            ThreadPool::new(*NUM_THREADS)
+        });
+
+    static ref REGISTRATIONS: Lazy<Registrations> =
+        Lazy::new(|| {
+            Arc::new(Mutex::new(HashMap::new()))
+        });
+
 }
 
 /// A NIF Resource representing the identifier for a DbInstance handle
 struct DbResource {
-    pub db_id: i32
+    db_id: i32,
+    engine: String,
+    path: String
 }
 
-/// Wrapper required to serialise NamedRows value as Erlang Term
-struct NamedRowsWrapper<'a>(&'a NamedRows, f64);
+/// Wrapper required to serialise NamedRows value as Erlang map
+struct NamedRowsWrapper<'a>(&'a NamedRows);
 
 impl<'a> Encoder for NamedRowsWrapper<'_> {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
@@ -125,15 +187,30 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
             Some(more_ref) => {
                 // Dereference `more` before encoding
                 let more = &**more_ref;
-                NamedRowsWrapper(more, 0.0).encode(env)
+                NamedRowsWrapper(more).encode(env)
             },
             None => atoms::undefined().encode(env)
         };
 
-        let took = self.1;
+        // Create and return the Erlang term {ok, map()}
+        let mut map = rustler::types::map::map_new(env);
+        map = map.map_put(atoms::headers(), headers).unwrap();
+        map = map.map_put(atoms::rows(), rows).unwrap();
+        map.map_put(atoms::next(), next).unwrap()
+    }
+}
 
-        // Create a cozo_named_rows record in Erlang
-        (atoms::cozo_named_rows(), headers, rows, next, took).encode(env)
+struct BTreeMapWrapper(BTreeMap<String, NamedRows>);
+
+impl<'a> Encoder for BTreeMapWrapper {
+    fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
+        let map = rustler::types::map::map_new(env);
+        for (key, value) in &self.0 {
+            let key_term = key.encode(env);
+            let value_term = NamedRowsWrapper(&value).encode(env);
+            map.map_put(key_term, value_term).unwrap();
+        }
+        map
     }
 }
 
@@ -161,7 +238,7 @@ impl<'a> Encoder for DataValueWrapper {
             DataValue::Json(i) => {
                 match serde_json::to_string(&i) {
                     Ok(json_str) =>
-                        json_str.encode(env),
+                        (atoms::json(), json_str).encode(env),
                     Err(_) =>
                         "error: failed to serialize JsonValue".encode(env),
                 }
@@ -239,41 +316,49 @@ impl<'a> Encoder for Array64Wrapper {
 
 
 /// Returns a new cozo engine
-#[rustler::nif(schedule = "DirtyIo")]
+#[rustler::nif(schedule = "DirtyIo", name="new_nif")]
 
 fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
     NifResult<Term<'a>> {
     // Validate engine
-    let engine = match engine.as_str() {
-        "mem" | "sqlite" | "rocksdb" =>
-            engine.as_str(),
-        _ =>
-            return Err(rustler::Error::Term(Box::new(atoms::invalid_engine())))
-    };
+    let result =
+        match engine.as_str() {
+            "mem" | "sqlite" | "rocksdb" =>
+                DbInstance::new_with_str(
+                    engine.as_str(), path.as_str(), options
+                ),
+            _ =>
+                return Err(rustler::Error::Term(
+                    Box::new(atoms::invalid_engine())
+                ))
+        };
 
-    let result = DbInstance::new_with_str(engine, path.as_str(), options);
-
-    let db = match result {
-        Ok(db) => {
-            db
-        },
-        Err(err) =>
-            // TODO catch error and pritty format
-            // RocksDB error: IO error: lock hold by current process,
-            return Err(rustler::Error::Term(Box::new(err.to_string())))
-    };
+    let db =
+        match result {
+            Ok(db) => {
+                db
+            },
+            Err(err) =>
+                // TODO catch error and pritty format
+                // RocksDB error: IO error: lock hold by current process,
+                return Err(rustler::Error::Term(Box::new(err.to_string())))
+        };
 
     let id = HANDLES.current.fetch_add(1, Ordering::AcqRel);
     let mut dbs = HANDLES.dbs.lock().unwrap();
     dbs.insert(id, db);
 
-    let resource = ResourceArc::new(DbResource {db_id: id});
+    let resource = ResourceArc::new(DbResource {
+        db_id: id,
+        engine: engine,
+        path: path
+    });
     Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
 }
 
 
 /// Returns the result of running script
-#[rustler::nif(schedule = "DirtyIo")]
+#[rustler::nif(schedule = "DirtyIo", name="close_nif")]
 
 fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
     NifResult<Term<'a>> {
@@ -290,9 +375,28 @@ fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
     }
 }
 
+/// Returns the result of running script
+#[rustler::nif(schedule = "DirtyIo", name="info_nif")]
+
+fn info<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
+    NifResult<Term<'a>> {
+
+    let mut map = rustler::types::map::map_new(env);
+    map = map.map_put(
+        atoms::engine().encode(env),
+        resource.engine.encode(env)
+    ).unwrap();
+    map = map.map_put(
+        atoms::path().encode(env),
+        resource.path.encode(env)
+    ).unwrap();
+    Ok(map)
+
+}
+
 
 /// Returns the result of running script
-#[rustler::nif(schedule = "DirtyIo")]
+#[rustler::nif(schedule = "DirtyIo", name="run_script_nif")]
 
 fn run_script<'a>(
     env: Env<'a>,
@@ -335,9 +439,9 @@ fn run_script<'a>(
     match db.run_script(&script, params_json, mutability) {
         Ok(named_rows) => {
             let took = start.elapsed().as_secs_f64();
-            let record = NamedRowsWrapper(&named_rows, took).encode(env);
-
-            let result = (atoms::ok().encode(env), record);
+            let mut map = NamedRowsWrapper(&named_rows).encode(env);
+            map = map.map_put(atoms::took(), took).unwrap();
+            let result = (atoms::ok(), map);
             Ok(result.encode(env))
         }
         Err(err) =>
@@ -346,7 +450,7 @@ fn run_script<'a>(
 }
 
 /// Sames as
-#[rustler::nif(schedule = "DirtyIo")]
+#[rustler::nif(schedule = "DirtyIo", name="run_script_json_nif")]
 fn run_script_json<'a>(
     env: Env<'a>,
     resource: ResourceArc<DbResource>,
@@ -401,7 +505,7 @@ fn run_script_json<'a>(
 }
 
 /// Run the CozoScript passed in folding any error into the returned JSON
-#[rustler::nif(schedule = "DirtyIo")]
+#[rustler::nif(schedule = "DirtyIo", name="run_script_str_nif")]
 fn run_script_str<'a>(
     env: Env<'a>,
     resource: ResourceArc<DbResource>,
@@ -424,6 +528,254 @@ fn run_script_str<'a>(
     let json_str = db.run_script_str(&script, &params, mutability);
     let result = (atoms::ok().encode(env), json_str.encode(env));
     Ok(result.encode(env))
+}
+
+
+/// Imports relations
+#[rustler::nif(schedule = "DirtyIo", name="import_relations_nif")]
+
+fn import_relations<'a>(
+    env: Env<'a>, resource: ResourceArc<DbResource>, data: String
+    ) -> NifResult<Term<'a>> {
+
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    match db.import_relations_str_with_err(&data) {
+        Ok(()) =>
+            Ok(atoms::ok().encode(env)),
+        Err(err) =>
+            Err(rustler::Error::Term(Box::new(err.to_string())))
+    }
+}
+
+// Exports relations defined by `relations`.
+#[rustler::nif(schedule = "DirtyIo", name="export_relations_nif")]
+
+fn export_relations<'a>(
+    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<Term<'a>>
+    ) -> NifResult<Term<'a>> {
+
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    let mut strings = Vec::new();
+    for term in relations {
+        let string: Result<String, _> = term.decode();
+        match string {
+            Ok(s) =>
+                strings.push(s),
+            Err(_) =>
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid relations".to_string())
+                    )
+                )
+        }
+    };
+
+    // let results = db.export_relations(strings.iter().map(|s| s as &str));
+    match db.export_relations(strings.iter()) {
+        Ok(btreemap) =>{
+            let data = BTreeMapWrapper(btreemap).encode(env);
+            Ok((atoms::ok().encode(env), data.encode(env)).encode(env))
+        },
+        Err(err) =>
+            Err(rustler::Error::Term(Box::new(err.to_string())))
+    }
+}
+
+
+
+/// Imports relations
+#[rustler::nif(schedule = "DirtyIo", name="export_relations_json_nif")]
+
+fn export_relations_json<'a>(
+    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<Term<'a>>
+    ) -> NifResult<Term<'a>> {
+
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    let mut strings = Vec::new();
+    for term in relations {
+        let string: Result<String, _> = term.decode();
+        match string {
+            Ok(s) =>
+                strings.push(s),
+            Err(_) =>
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid relations".to_string())
+                    )
+                )
+        }
+    };
+
+    // let results = db.export_relations(strings.iter().map(|s| s as &str));
+    match db.export_relations(strings.iter()) {
+        Ok(btreemap) =>{
+            let data = BTreeMapWrapper(btreemap).encode(env);
+            Ok((atoms::ok().encode(env), data.encode(env)).encode(env))
+        },
+        Err(err) =>
+            Err(rustler::Error::Term(Box::new(err.to_string())))
+    }
+}
+
+
+
+#[rustler::nif(schedule = "DirtyCpu", name = "register_callback_nif",)]
+
+fn register_callback<'a>(
+    env: Env<'a>,
+    resource: ResourceArc<DbResource>,
+    rel: String) -> NifResult<Term<'a>>  {
+
+    // Get db handle and fail is invalid
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    // Register the callback in cozodb
+    let (reg_id, receiver) = db.register_callback(rel.as_str(), None);
+
+    // This is a "threaded NIF": it spawns a thread that sends a message back
+    // to the calling thread later.
+    let local_pid = env.pid();
+
+    // Store receiver and PID in the global maps
+    {
+        let mut regs = REGISTRATIONS.lock().unwrap();
+        regs.insert(reg_id, Registration{
+            receiver: receiver, relname: rel.clone(), pid: local_pid
+        });
+    }
+
+    // Distribute across threads in pool
+    // Add a new receiver to the shared state and schedules a worker thread to
+    // process messages from it. Receivers are distributed across threads in a
+    // round-robin fashion using an atomic counter (next_worker).
+    let pool = THREAD_POOL.clone();
+    let worker_count = pool.max_count();
+    let regs_clone = REGISTRATIONS.clone();
+
+    // Hash the metadata to determine the worker index
+    let hash = calculate_hash(&rel);
+    let worker_index = (hash % pool.max_count() as u64) as usize;
+
+    pool.execute(move || {
+        worker_thread(regs_clone, worker_count, worker_index);
+    });
+
+    Ok((atoms::ok(), reg_id).encode(env))
+}
+
+
+fn worker_thread(
+    registrations: Registrations, worker_count: usize, worker_index: usize) -> bool {
+        loop {
+            let registrations = registrations.lock().unwrap();
+
+            // Filter receivers for this worker thread
+            for (&reg_id, registration) in registrations.iter() {
+                let rel = &registration.relname;
+                if should_handle(&rel, worker_count, worker_index) { {
+                    let receiver = &registration.receiver;
+                    let pid = registration.pid;
+                    for (op, new_rows, old_rows) in receiver.try_iter() {
+                        handle_event(rel, op, new_rows, old_rows, reg_id, pid);
+                    }
+                }
+            }
+
+            // Sleep or yield the thread to prevent busy-waiting
+            // std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+
+/// Returns true if relname hashes to the worker_index
+fn should_handle(relname: &String, worker_count: usize, worker_index: usize) -> bool {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        relname.hash(&mut hasher);
+        let hash = hasher.finish();
+        // let size : usize = *NUM_THREADS;
+        (hash % worker_count as u64) as usize == worker_index
+    }
+
+fn handle_event(
+    rel: &String,
+    op: CallbackOp,
+    new_rows: NamedRows,
+    old_rows: NamedRows,
+    reg_id: u32,
+    pid: Pid) {
+    let _ = OwnedEnv::new().send_and_clear(&pid, |env| {
+        let result: NifResult<Term> = (|| {
+            let reg_id = reg_id.encode(env);
+            let rel = rel.encode(env);
+            let op = match op {
+                CallbackOp::Put => atoms::updated(),
+                CallbackOp::Rm => atoms::removed()
+            };
+            let event_name = vec![
+                atoms::cozodb(),
+                atoms::relation(),
+                op
+            ];
+            let new_rows = NamedRowsWrapper(&new_rows).encode(env);
+            let old_rows = NamedRowsWrapper(&old_rows).encode(env);
+            let event = (
+                event_name,
+                reg_id,
+                rel,
+                new_rows,
+                old_rows
+            );
+            Ok(event.encode(env))
+        })();
+
+        match result {
+            Ok(term) => term,
+            Err(_err) => env.error_tuple("failed".encode(env))
+        }
+    });
 }
 
 
@@ -453,4 +805,11 @@ fn params_to_btree(params: &String) ->
 fn get_db(db_id: i32) -> Option<DbInstance> {
     let dbs = HANDLES.dbs.lock().unwrap();
     dbs.get(&db_id).cloned()
+}
+
+
+fn calculate_hash<T: Hash>(t: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    t.hash(&mut hasher);
+    hasher.finish()
 }

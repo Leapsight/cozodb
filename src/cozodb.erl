@@ -149,8 +149,6 @@
 %% -export([backup_db/2]).
 %% -export([restore_backup/2]).
 %% -export([import_from_backup/2]).
-
-%% -export([unregister_callback/2]).
 %% -export([register_fixed_rule/2]).
 %% -export([unregister_fixed_rule/2]).
 

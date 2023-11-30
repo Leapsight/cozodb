@@ -476,7 +476,7 @@ fn run_script_json<'a>(
         if atoms::true_() == mutability {
             ScriptMutability::Mutable
         } else {
-            ScriptMutability::Mutable
+            ScriptMutability::Immutable
 
         };
 

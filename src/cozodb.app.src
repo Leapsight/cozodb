@@ -1,7 +1,8 @@
 {application, cozodb,
- [{description, "Erlang wrapper for CozoDB."},
+ [{description, "Erlang NIF wrapper for CozoDB."},
   {vsn, "0.1.0"},
   {registered, []},
+  {mod, {cozodb_app, []}},
   {applications,
    [kernel,
     stdlib

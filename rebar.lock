@@ -1,8 +1,11 @@
 {"1.2.0",
-[{<<"thoas">>,{pkg,<<"thoas">>,<<"1.0.0">>},0}]}.
+[{<<"telemetry">>,{pkg,<<"telemetry">>,<<"1.2.1">>},0},
+ {<<"thoas">>,{pkg,<<"thoas">>,<<"1.0.0">>},0}]}.
 [
 {pkg_hash,[
+ {<<"telemetry">>, <<"68FDFE8D8F05A8428483A97D7AAB2F268AAFF24B49E0F599FAA091F1D4E7F61C">>},
  {<<"thoas">>, <<"567C03902920827A18A89F05B79A37B5BF93553154B883E0131801600CF02CE0">>}]},
 {pkg_hash_ext,[
+ {<<"telemetry">>, <<"DAD9CE9D8EFFC621708F99EAC538EF1CBE05D6A874DD741DE2E689C47FEAFED5">>},
  {<<"thoas">>, <<"FC763185B932ECB32A554FB735EE03C3B6B1B31366077A2427D2A97F3BD26735">>}]}
 ].

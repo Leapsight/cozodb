@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  cozodb.erl -
 %%
-%%  Copyright (c) 2020 Leapsight Holdings Limited. All rights reserved.
+%%  Copyright (c) 2023 Leapsight Holdings Limited. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -34,8 +34,6 @@
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, ?LINE}]})
 ).
 
-
-
 -type relations()           ::  #{
                                     relation_name() => #{
                                         headers => [binary()],
@@ -47,7 +45,11 @@
 -type path()                ::  filename:filename() | binary().
 -type db_opts()             ::  map().
 -type index_type()          ::  covering | hnsw | lsh | fts.
--type index_spec()          ::  #{
+-type index_spec()          ::  covering_index_spec()
+                                | hnsw_index_spec()
+                                | lsh_index_spec()
+                                | fts_index_spec().
+-type covering_index_spec() ::  #{
                                     type := covering,
                                     fields => [column_name()]
                                 }.
@@ -133,7 +135,6 @@
 -export([columns/2]).
 -export([indices/2]).
 -export([create_index/3]).
--export([create_index_query/2]).
 -export([drop_index/3]).
 
 %% API: Utils
@@ -300,7 +301,12 @@ run(DbRef, Script, Opts)
 when is_reference(DbRef), is_binary(Script), is_map(Opts) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
     Mutability = maps:get(mutability, Opts, false),
+    %% telemetry:execute(
+    %% [cozodb, query, start],
+    %% #{system_time => erlang:system_time(), script => Script}
+    %% ),
     run_script_nif(DbRef, Script, Params, Mutability).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -549,8 +555,19 @@ create_index_query(RelName, #{type := covering, fields := L}) ->
         ${, $\s, lists:join(", ", L), $\s, $}
     ];
 
-create_index_query(_RelName, _) ->
-    error(not_implemented).
+create_index_query(_RelName, #{type := fts} = Spec) ->
+    error(not_implemented);
+
+create_index_query(_RelName, #{type := lsh} = Spec) ->
+    error(not_implemented);
+
+create_index_query(_RelName, #{type := hnsw} = Spec) ->
+    error(not_implemented);
+
+create_index_query(RelName, #{type := _} = Spec) ->
+    ?ERROR(badarg, [RelName, Spec], #{
+        2 => "invalid value for field type"
+    }).
 
 
 

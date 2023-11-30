@@ -1,7 +1,7 @@
 // =============================================================================
 // cozodb.erl -
 //
-// Copyright (c) 2020 Leapsight Holdings Limited. All rights reserved.
+// Copyright (c) 2023 Leapsight Holdings Limited. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,28 +16,18 @@
 // limitations under the License.
 // =============================================================================
 
+// Rust std libs
 use core::hash::Hash;
-use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::Hasher;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-// Used for CALLBACKS feature
-// use std::thread;
-use once_cell::sync::Lazy;
-use std::sync::Arc;
-use threadpool::ThreadPool;
-use crossbeam::channel::*;
-
-use cozo::*;
-use ndarray::Array1; // used by cozo
-
-
-
+// Rustler
 use rustler::Encoder;
 use rustler::Env;
 use rustler::NifResult;
@@ -46,6 +36,17 @@ use rustler::ResourceArc;
 use rustler::Term;
 use rustler::types::Pid;
 
+// Used for global state
+use lazy_static::lazy_static;
+
+// Used for CALLBACKS feature
+use once_cell::sync::Lazy;
+use threadpool::ThreadPool;
+use crossbeam::channel::*;
+
+// Cozo
+use cozo::*;
+use ndarray::Array1; // used by Array32Wrapper
 
 
 
@@ -115,7 +116,7 @@ fn on_load(env: Env, _: Term) -> bool {
 
 
 /// Struct used to globally manage database handles
-/// This is combined with lazy_static!macro to create a static variable
+/// This is combined with lazy_static! macro to create a static variable
 /// containing this struct.
 struct Handles {
     current: AtomicI32, // thread safe counter
@@ -135,9 +136,9 @@ type Registrations = Arc<Mutex<HashMap<u32, Registration>>>;
 
 // Static variables are allocated for the duration of a program's run and are
 // not specific to any thread.
-// lazy_static is used because Rust's standard library doesn't support static
-// variables with non-constant initializers directly. It lazily initializes the
-// variable on its first access.
+// This macro lazily initializes the variable on its first access.
+// We use it because Rust's standard library doesn't support static
+// variables with non-constant initializers directly.
 lazy_static! {
     // Required so that we can close a database from Erlang
     static ref HANDLES: Handles =
@@ -148,15 +149,49 @@ lazy_static! {
             dbs: Mutex::new(Default::default())
         };
 
-    static ref NUM_THREADS: usize = num_cpus::get();
-
-    // Required for Callback feature
+    // Required for Callback feature.
+    // We use THREAD_POOL to shard the callback handlers based on relation name.
+    // This means each thread will be responsible for handling the events
+    // published on each callback registration channel. This is a more robust
+    // alternative than spawning thread for each subscription that is used in
+    // other binding libraries, where there is no limit to the number of
+    // subscriptions. This obvisoulsy comes at the cost of extra
+    // synchronisation.
     static ref THREAD_POOL: Lazy<ThreadPool> =
         Lazy::new(|| {
-            // Adjust the number of threads in the pool as needed from config
             ThreadPool::new(*NUM_THREADS)
         });
 
+    // Required for Callback feature.
+    // See THREAD_POOL comments.
+    static ref NUM_THREADS: usize = {
+        // Attempt to get the value from an environment variable
+        if let Ok(val) = std::env::var("COZODB_CALLBACK_THREADPOOL_SIZE") {
+            let mut num = val.parse::<usize>().unwrap_or_default();
+            if num == 0 {
+                // unwrap_or_default() will return 0 if invalid.
+                // If 0 we default to the number of cores in the host.
+                num = num_cpus::get();
+            };
+            num
+        }
+        // Uncomment if using a config file
+        // else if let Ok(mut settings) = Config::builder()
+        //     .add_source(File::with_name("Config"))
+        //     .build()
+        // {
+        //     settings.get::<usize>("config_key").unwrap_or_default()
+        // }
+        else {
+            // Default value if neither is available
+            num_cpus::get()
+        }
+    };
+
+    // Required for Callback feature.
+    // We use REGISTRATIONS to keep track of the metadata associated with it,
+    // including the relation name, channel and the caller's LocalPid which we
+    // need in order to match events and send the event to the Erlang caller.
     static ref REGISTRATIONS: Lazy<Registrations> =
         Lazy::new(|| {
             Arc::new(Mutex::new(HashMap::new()))
@@ -164,14 +199,16 @@ lazy_static! {
 
 }
 
-/// A NIF Resource representing the identifier for a DbInstance handle
+/// A NIF Resource representing the identifier for a DbInstance handle.
+/// We use HANDLES to associate identifiers with Cozo's DbInstance Handles
+/// so that we can use close().
 struct DbResource {
     db_id: i32,
     engine: String,
     path: String
 }
 
-/// Wrapper required to serialise NamedRows value as Erlang map
+/// Wrapper required to serialise Cozo's NamedRows value as Erlang map
 struct NamedRowsWrapper<'a>(&'a NamedRows);
 
 impl<'a> Encoder for NamedRowsWrapper<'_> {
@@ -201,6 +238,7 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
     }
 }
 
+/// Wrapper required by Cozo's export_relations()
 struct BTreeMapWrapper(BTreeMap<String, NamedRows>);
 
 impl<'a> Encoder for BTreeMapWrapper {
@@ -216,7 +254,7 @@ impl<'a> Encoder for BTreeMapWrapper {
 }
 
 
-/// Wrapper required to serialise DataValue value as Erlang Term
+/// Wrapper required to serialise Cozo's DataValue value as Erlang Term
 struct DataValueWrapper(DataValue);
 
 impl<'a> Encoder for DataValueWrapper {
@@ -261,7 +299,7 @@ impl<'a> Encoder for DataValueWrapper {
     }
 }
 
-/// Wrapper required to serialise Num value as Erlang Term
+/// Wrapper required to serialise Cozo's Num value as Erlang Term
 struct NumWrapper(Num);
 
 impl<'a> Encoder for NumWrapper {
@@ -272,7 +310,7 @@ impl<'a> Encoder for NumWrapper {
         }
     }}
 
-/// Wrapper required to serialise Vector value as Erlang Term
+/// Wrapper required to serialise Cozo's Vector value as Erlang Term
 struct VectorWrapper(Vector);
 
 impl<'a> Encoder for VectorWrapper {
@@ -284,8 +322,7 @@ impl<'a> Encoder for VectorWrapper {
     }
 }
 
-
-/// Wrapper required to serialise Vector value as Erlang Term
+/// Wrapper required to serialise Cozo's Array1<f32> value as Erlang Term
 struct Array32Wrapper(Array1<f32>);  // Used by Vector
 
 impl<'a> Encoder for Array32Wrapper {
@@ -297,7 +334,7 @@ impl<'a> Encoder for Array32Wrapper {
     }
 }
 
-/// Wrapper required to serialise Vector value as Erlang Term
+/// Wrapper required to serialise Cozo's Array1<f64> value as Erlang Term
 struct Array64Wrapper(Array1<f64>);  // Used by Vector
 
 impl<'a> Encoder for Array64Wrapper {
@@ -321,7 +358,7 @@ impl<'a> Encoder for Array64Wrapper {
 
 fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
     NifResult<Term<'a>> {
-    // Validate engine
+    // Validate engine name and obtain DBInstance
     let result =
         match engine.as_str() {
             "mem" | "sqlite" | "rocksdb" =>
@@ -334,6 +371,7 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
                 ))
         };
 
+    // Validate we have a DBInstance and return error if not
     let db =
         match result {
             Ok(db) => {
@@ -345,10 +383,12 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
                 return Err(rustler::Error::Term(Box::new(err.to_string())))
         };
 
+    // Store the DBInstance handle in a global hashmap using id as key
     let id = HANDLES.current.fetch_add(1, Ordering::AcqRel);
     let mut dbs = HANDLES.dbs.lock().unwrap();
     dbs.insert(id, db);
 
+    // Finally create and return a Nif Resource with the id and metadata
     let resource = ResourceArc::new(DbResource {
         db_id: id,
         engine: engine,
@@ -358,7 +398,7 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
 }
 
 
-/// Returns the result of running script
+/// Returns the result of running a script
 #[rustler::nif(schedule = "DirtyIo", name="close_nif")]
 
 fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
@@ -376,7 +416,7 @@ fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
     }
 }
 
-/// Returns the result of running script
+/// Returns the metadata associated with the resource
 #[rustler::nif(schedule = "DirtyIo", name="info_nif")]
 
 fn info<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
@@ -423,7 +463,7 @@ fn run_script<'a>(
         if atoms::true_() == mutability {
             ScriptMutability::Mutable
         } else {
-            ScriptMutability::Mutable
+            ScriptMutability::Immutable
 
         };
 
@@ -450,7 +490,7 @@ fn run_script<'a>(
     }
 }
 
-/// Sames as
+/// Sames as run_script but encodes as JSON
 #[rustler::nif(schedule = "DirtyIo", name="run_script_json_nif")]
 fn run_script_json<'a>(
     env: Env<'a>,
@@ -476,7 +516,7 @@ fn run_script_json<'a>(
         if atoms::true_() == mutability {
             ScriptMutability::Mutable
         } else {
-            ScriptMutability::Immutable
+            ScriptMutability::Mutable
 
         };
 
@@ -604,9 +644,7 @@ fn export_relations<'a>(
     }
 }
 
-
-
-/// Imports relations
+/// Export relations as JSON
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_json_nif")]
 
 fn export_relations_json<'a>(
@@ -650,7 +688,6 @@ fn export_relations_json<'a>(
             Err(rustler::Error::Term(Box::new(err.to_string())))
     }
 }
-
 
 
 #[rustler::nif(schedule = "DirtyCpu", name = "register_callback_nif",)]

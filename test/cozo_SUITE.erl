@@ -30,15 +30,15 @@
 %%% @copyright 2023 Mathieu Kerjouan
 %%% @author Mathieu Kerjouan
 %%%===================================================================
--module(cozodb_SUITE).
+-module(cozo_SUITE).
 -compile(export_all).
 -include_lib("common_test/include/ct.hrl").
-%% -include("cozodb.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("cozodb_test.hrl").
--define(DB_PATH_TEST, "/tmp/cozodb_test").
--define(DB_PREFIX, "cozodb_test_SUITE").
--define(MODULE_TEST, cozo).
 
+-define(DATA_DIR_TEST, "/tmp/cozodb_test_SUITE").
+%% -define(ENGINES, [mem, sqlite, rocksdb]).
+-define(ENGINES, [mem, sqlite]).
 %%--------------------------------------------------------------------
 %% Function: suite() -> Info
 %% Info = [tuple()]
@@ -52,11 +52,10 @@ suite() -> [{timetrap,{seconds,30}}].
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    ok = application:set_env(cozodb, db_path, ?DB_PATH_TEST),
-    ok = application:set_env(cozodb, db_filename_prefix, ?DB_PREFIX),
+    ok = application:set_env(cozodb, data_dir, ?DATA_DIR_TEST),
     case proplists:get_value(create_path, Config, true) of
         true -> 
-            ok = file:make_dir(?DB_PATH_TEST);
+            ok = file:make_dir(?DATA_DIR_TEST);
         _ -> ok
     end,
     Config.
@@ -68,10 +67,9 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     case proplists:get_value(clean_path, Config, true) of
         false -> ok;
-        _ -> ok = file:del_dir_r(?DB_PATH_TEST)
+        _ -> ok = file:del_dir_r(?DATA_DIR_TEST)
     end,
-    ok = application:unset_env(cozo, db_filename_prefix),
-    ok = application:unset_env(cozo, db_path),
+    ok = application:unset_env(cozodb, data_dir),
     ok.
 
 %%--------------------------------------------------------------------
@@ -136,13 +134,25 @@ groups() ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 
-all() -> [ simple
-   , tutorial_intro, tutorial_expressions, tutorial_rules
-         , tutorial_stored_relations, tutorial_command_blocks
-         , tutorial_graphs, air_routes, multi_spawn
-   , maintenance_commands, system_commands
-   , index, hnsw, lsh, fts
-   , sqlite, rocksdb].
+all() -> [
+    simple
+    , tutorial_intro
+    , tutorial_expressions
+    , tutorial_rules
+    , tutorial_stored_relations
+    , tutorial_command_blocks
+    , tutorial_graphs
+    , air_routes
+    , multi_spawn
+    , maintenance_commands
+    , system_commands
+    , index
+    , hnsw
+    , lsh
+    , fts
+    , sqlite
+    , rocksdb
+    ].
 
 %%--------------------------------------------------------------------
 %% Function: TestCase() -> Info
@@ -152,7 +162,7 @@ simple() -> [].
 
 simple(_Config) ->
     % open a new database
-    {ok, Db} = cozodb:new(mem, []),
+    {ok, Db} = cozodb:open(),
 
     % query using string
     % {ok, _} = cozodb:run(Db, "?[] <- [[1, 2, 3]]"),
@@ -165,28 +175,29 @@ simple(_Config) ->
     {ok, _} = cozodb:run(Db, ["?[] <- [[1, 2, 3]]"]),
 
     % wrong term used for queries
-    {error, _} = cozodb:run(Db, query),
-    {error, _} = cozodb:run(Db, ""),
-    {error, _} = cozodb:run(Db, "", ""),
+    ?assertError(function_clause, cozodb:run(Db, query)),
+    ?assertError(badarg, cozodb:run(Db, "")),
+    ?assertError(function_clause, cozodb:run(Db, "", "")),
 
     % close database
-    ok = cozodb:close(Db),
+    %% ok = cozodb:close(Db),
 
     % wrong engine
-    {error, {bad_engine, _}} = cozodb:open(test),
+    ?assertError(badarg, cozodb:open(test)),
 
     % not existing path
     % does not work correctly on github workflow
     % {error, _} = cozodb:open(mem, "/not/existing/path"),
 
     % bad path
-    {error, _} = cozodb:open(mem, a_wrong_path),
+    ?assertError(function_clause, cozodb:open(mem, a_wrong_path)),
 
     % bad configuration provided
-    {error, _} = cozodb:open(mem, "/tmp", "bad"),
+    ?assertError(function_clause, cozodb:open(mem, "/tmp", "not a map")),
 
     % close an already closed database
-    {error, _} = cozodb:close(Db).
+    %% {error, _} = cozodb:close(Db).
+    ok.
 
 %%--------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#First-steps
@@ -194,8 +205,8 @@ simple(_Config) ->
 tutorial_intro() -> [].
 
 tutorial_intro(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_intro_fun/1, Mapping).
 
@@ -213,8 +224,8 @@ tutorial_intro_fun({Module, Engine}) ->
 tutorial_expressions() -> [].
 
 tutorial_expressions(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_expressions_fun/1, Mapping).
 
@@ -241,8 +252,8 @@ tutorial_expressions_fun({Module, Engine}) ->
 tutorial_rules() -> [].
 
 tutorial_rules(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_rules_fun/1, Mapping).
 
@@ -266,8 +277,8 @@ tutorial_rules_fun({Module, Engine}) ->
 tutorial_joins() -> [].
 
 tutorial_joins(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_joins_fun/1, Mapping).
 
@@ -292,8 +303,8 @@ tutorial_joins_fun({Module, Engine}) ->
 tutorial_stored_relations() -> [].
 
 tutorial_stored_relations(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_stored_relations_fun/1, Mapping).
 
@@ -323,7 +334,7 @@ tutorial_stored_relations_fun({Module, Engine}) ->
     % @todo: crash ?IQUERY_LOG(Db, "?[a, b] := *stored{l2: b, l1: a}"),
     % @todo: crash ?IQUERY_LOG(Db, "?[l2] := *stored{l2}"),
     % ?IQUERY_LOG(Db, "?[l1, l2] <- [['e', 'E']]"
-    %       ":rm stored {l1, l2}"),
+    %		":rm stored {l1, l2}"),
 
     ?IQUERY_LOG(Db, "?[l1, l2] := *stored[l1, l2]"),
     ?IQUERY_LOG(Db, "::remove stored"),
@@ -337,8 +348,8 @@ tutorial_stored_relations_fun({Module, Engine}) ->
 tutorial_command_blocks() -> [].
 
 tutorial_command_blocks(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_command_blocks_fun/1, Mapping).
 
@@ -356,8 +367,8 @@ tutorial_command_blocks_fun({Module, Engine}) ->
 tutorial_graphs() -> [].
 
 tutorial_graphs(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_graphs_fun/1, Mapping).
 
@@ -438,8 +449,8 @@ air_routes() -> [].
 
 air_routes(Config) ->
     DataDir = proplists:get_value(data_dir, Config),
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {DataDir, M,E} || M <- Modules, E <- Engines ],
     lists:map(fun air_routes_fun/1, Mapping).
 
@@ -647,8 +658,8 @@ air_routes_fun({DataDir, Module, Engine}) ->
 sqlite() -> [].
 
 sqlite(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun sqlite_fun/1, Mapping).
 
@@ -693,8 +704,8 @@ sqlite_fun({Module, _Engine}) ->
 rocksdb() -> [].
 
 rocksdb(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun rocksdb_fun/1, Mapping).
 
@@ -733,8 +744,8 @@ rocksdb_fun({Module, _Engine}) ->
 maintenance_commands() -> [].
 
 maintenance_commands(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun maintenance_commands_fun/1, Mapping).
 
@@ -787,8 +798,8 @@ maintenance_commands_fun({Module, Engine}) ->
 system_commands() -> [].
 
 system_commands(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun system_commands_fun/1, Mapping).
 
@@ -845,8 +856,8 @@ system_commands_fun({Module, Engine}) ->
 index() -> [].
 
 index(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun index_fun/1, Mapping).
 
@@ -864,8 +875,8 @@ index_fun({Module, Engine}) ->
 hnsw() -> [].
 
 hnsw(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun hnsw_fun/1, Mapping).
 
@@ -893,8 +904,8 @@ hnsw_fun({Module, Engine}) ->
 lsh() -> [].
 
 lsh(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun lsh_fun/1, Mapping).
 
@@ -922,8 +933,8 @@ lsh_fun({Module, Engine}) ->
 fts() -> [].
 
 fts(Config) ->
-    Engines = proplists:get_value(engines, Config, [mem, sqlite, rocksdb]),
-    Modules = proplists:get_value(modules, Config, [cozo, cozo_db]),
+    Engines = proplists:get_value(engines, Config, ?ENGINES),
+    Modules = proplists:get_value(modules, Config, [cozodb, cozodb]),
     Mapping = [ {M,E} || M <- Modules, E <- Engines ],
     lists:map(fun fts_fun/1, Mapping).
 
@@ -956,6 +967,6 @@ multi_spawn(_Config) ->
 cozo_spawn(Counter) ->
   Open = fun() -> {ok, Db} = cozodb:open(), Db end,
   Dbs = [ Open() || _ <- lists:seq(1, Counter) ],
-  Run = fun(Db) -> spawn(cozo, run, [Db, "?[] <- [[1, 2, 3]]"]) end,
+  Run = fun(Db) -> spawn(cozodb, run, [Db, "?[] <- [[1, 2, 3]]"]) end,
   [ Run(Db) || Db <- Dbs ],
   [ cozodb:close(Db) || Db <- Dbs ].

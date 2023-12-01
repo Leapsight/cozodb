@@ -444,7 +444,7 @@ fn run_script<'a>(
     resource: ResourceArc<DbResource>,
     script: String,
     params: String,
-    mutability: Term
+    read_only: Term
     ) -> NifResult<Term<'a>> {
 
     let db =
@@ -459,12 +459,11 @@ fn run_script<'a>(
             }
         };
 
-    let mutability =
-        if atoms::true_() == mutability {
-            ScriptMutability::Mutable
-        } else {
+    let read_only =
+        if atoms::true_() == read_only {
             ScriptMutability::Immutable
-
+        } else {
+            ScriptMutability::Mutable
         };
 
     let params_json =
@@ -477,7 +476,7 @@ fn run_script<'a>(
 
     let start = Instant::now();
 
-    match db.run_script(&script, params_json, mutability) {
+    match db.run_script(&script, params_json, read_only) {
         Ok(named_rows) => {
             let took = start.elapsed().as_secs_f64();
             let mut map = NamedRowsWrapper(&named_rows).encode(env);
@@ -497,7 +496,7 @@ fn run_script_json<'a>(
     resource: ResourceArc<DbResource>,
     script: String,
     params: String,
-    mutability: Term
+    read_only: Term
     ) -> NifResult<Term<'a>>  {
 
     let db =
@@ -512,12 +511,11 @@ fn run_script_json<'a>(
             }
         };
 
-    let mutability =
-        if atoms::true_() == mutability {
-            ScriptMutability::Mutable
+    let read_only =
+        if atoms::true_() == read_only {
+            ScriptMutability::Immutable
         } else {
             ScriptMutability::Mutable
-
         };
 
     let params_json =
@@ -531,7 +529,7 @@ fn run_script_json<'a>(
     let result = db.run_script(
         &script,
         params_json,
-        mutability
+        read_only
     ).unwrap();
 
     let json = result.into_json();
@@ -552,7 +550,7 @@ fn run_script_str<'a>(
     resource: ResourceArc<DbResource>,
     script: String,
     params: String,
-    mutability: Term
+    read_only: Term
     ) -> NifResult<Term<'a>>  {
     let db = match get_db(resource.db_id) {
         Some(db) => db,
@@ -565,8 +563,8 @@ fn run_script_str<'a>(
         }
     };
 
-    let mutability = atoms::true_() == mutability;
-    let json_str = db.run_script_str(&script, &params, mutability);
+    let read_only = atoms::true_() == read_only;
+    let json_str = db.run_script_str(&script, &params, read_only);
     let result = (atoms::ok().encode(env), json_str.encode(env));
     Ok(result.encode(env))
 }

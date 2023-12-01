@@ -99,7 +99,7 @@
                                 | {stopwords, Lang :: string()}.
 -type query_opts()          ::  #{
                                     encoding => json | undefined,
-                                    mutability => boolean(),
+                                    read_only => boolean(),
                                     params => map()
                                 }.
 -type query_return()        ::  {ok, query_result()}
@@ -239,7 +239,9 @@ when is_atom(Engine), is_binary(Path), is_map(Opts) ->
 -spec close(DbRef :: reference()) -> ok | {error, Reason :: any()}.
 
 close(DbRef) when is_reference(DbRef) ->
-    close_nif(DbRef).
+    Res = close_nif(DbRef),
+    timer:sleep(1000),
+    Res.
 
 
 %% -----------------------------------------------------------------------------
@@ -271,8 +273,8 @@ run(DbRef, Script) when is_list(Script) ->
 
 run(DbRef, Script) when is_reference(DbRef), is_binary(Script) ->
     Params = map_to_json(#{}),
-    Mutability = false,
-    run_script_nif(DbRef, Script, Params, Mutability).
+    ReadOnly = false,
+    run_script_nif(DbRef, Script, Params, ReadOnly).
 
 
 %% -----------------------------------------------------------------------------
@@ -288,24 +290,24 @@ run(DbRef, Script, Opts) when is_list(Script) ->
 run(DbRef, Script, #{encoding := json} = Opts)
 when is_reference(DbRef), is_binary(Script) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
-    Mutability = maps:get(mutability, Opts, false),
-    run_script_json_nif(DbRef, Script, Params, Mutability);
+    ReadOnly = maps:get(read_only, Opts, false),
+    run_script_json_nif(DbRef, Script, Params, ReadOnly);
 
 run(DbRef, Script, #{encoding := map} = Opts)
 when is_reference(DbRef), is_binary(Script) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
-    Mutability = maps:get(mutability, Opts, false),
-    run_script_str_nif(DbRef, Script, Params, Mutability);
+    ReadOnly = maps:get(read_only, Opts, false),
+    run_script_str_nif(DbRef, Script, Params, ReadOnly);
 
 run(DbRef, Script, Opts)
 when is_reference(DbRef), is_binary(Script), is_map(Opts) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
-    Mutability = maps:get(mutability, Opts, false),
+    ReadOnly = maps:get(read_only, Opts, false),
     %% telemetry:execute(
     %% [cozodb, query, start],
     %% #{system_time => erlang:system_time(), script => Script}
     %% ),
-    run_script_nif(DbRef, Script, Params, Mutability).
+    run_script_nif(DbRef, Script, Params, ReadOnly).
 
 
 
@@ -777,10 +779,10 @@ close_nif(_DbRef) ->
     DbRef :: reference(),
     Script :: binary(),
     Params :: binary(),
-    Mutability :: boolean()) ->
+    ReadOnly :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_nif(_DbRef, _Script, _Params, _Mutability) ->
+run_script_nif(_DbRef, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
 
 
@@ -793,10 +795,10 @@ run_script_nif(_DbRef, _Script, _Params, _Mutability) ->
     DbRef :: reference(),
     Script :: binary(),
     Params :: binary(),
-    Mutability :: boolean()) ->
+    ReadOnly :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_json_nif(_DbRef, _Script, _Params, _Mutability) ->
+run_script_json_nif(_DbRef, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
 
 
@@ -809,10 +811,10 @@ run_script_json_nif(_DbRef, _Script, _Params, _Mutability) ->
     DbRef :: reference(),
     Script :: binary(),
     Params :: binary(),
-    Mutability :: boolean()) ->
+    ReadOnly :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_str_nif(_DbRef, _Script, _Params, _Mutability) ->
+run_script_str_nif(_DbRef, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
 
 

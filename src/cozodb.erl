@@ -41,7 +41,40 @@
                                     }
                                 }.
 -type relation_name()       ::  binary().
+-type relation_spec()       ::  binary()
+                                | #{
+                                        keys => [
+                                            {column_name(), column_spec()}
+                                        ],
+                                        columns => [
+                                            {column_name(), column_spec()}
+                                        ]
+                                    }.
+-type column_spec()         ::  undefined
+                                |#{
+                                    type => column_type(),
+                                    nullable => boolean()
+                                }.
+-type column_name()         ::  binary().
+-type column_type()         ::  column_atomic_type() | column_composite_type().
+-type column_atomic_type()  ::  any  % Any
+                                | bool % Bool
+                                | bytes % Bytes
+                                | json % Json
+                                | int % Int
+                                | float % Float
+                                | string % String
+                                | uuid % Uuid
+                                | validity. % Validity
+-type column_composite_type() ::
+                                {list, column_atomic_type()}
+                                | {list,
+                                    column_atomic_type(), Size :: pos_integer()}
+                                | {tuple, [column_atomic_type()]}
+                                | {vector, 32|64, Size :: pos_integer()}.
+
 -type engine()              ::  mem | sqlite | rocksdb.
+-type engine_opts()         ::  map().
 -type path()                ::  filename:filename() | binary().
 -type db_opts()             ::  map().
 -type index_type()          ::  covering | hnsw | lsh | fts.
@@ -116,7 +149,6 @@
                                 | binary() | validity() | json().
 -type json()                ::  {json, binary()}.
 -type validity()            ::  {float(), boolean()}.
--type column_name()         ::  binary().
 -type export_opts()         ::  #{encoding => json}.
 -type info()                ::  #{engine := binary(), path := binary()}.
 
@@ -417,15 +449,22 @@ relations(DbRef) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec create_relation(DbRef :: reference(), RelName :: binary() | list()) ->
+-spec create_relation(
+    DbRef :: reference(),
+    RelName :: binary() | list(),
+    Spec :: relation_spec()) ->
     query_return().
 
-create_relation(DbRef, RelName) when is_list(RelName) ->
-    create_relation(DbRef, list_to_binary(RelName));
+create_relation(DbRef, RelName, Spec) when is_list(RelName) ->
+    create_relation(DbRef, list_to_binary(RelName), Spec);
 
-create_relation(DbRef, RelName) ->
-    %% run(DbRef, <<"::create", $\s, RelName/binary>>).
-    error(not_implemented).
+create_relation(DbRef, RelName, Spec) when is_map(Spec) ->
+    create_relation(DbRef, RelName, encode_relation_columns(Spec));
+
+create_relation(DbRef, RelName, Spec)
+when is_binary(RelName), is_binary(Spec) ->
+    Query = [<<"::create">>, $\s, RelName, Spec],
+    run(DbRef, iolist_to_binary(Query)).
 
 
 %% -----------------------------------------------------------------------------
@@ -953,6 +992,112 @@ json_encoder() ->
 
 %% json_decoder() ->
 %%     application:get_env(?APP, json_parser, thoas).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec encode_relation_spec(map()) -> iolist().
+
+encode_relation_spec(Spec) when is_map(Spec) ->
+    Keys =
+        case encode_relation_columns(maps:get(keys, Spec, [])) of
+            [] ->
+                [];
+            L ->
+                L ++ [$\s, $=, $>]
+        end,
+
+    [
+        ${, $\s,
+        Keys,
+        encode_relation_columns(maps:get(columns, Spec, [])),
+        $\s, $}
+    ].
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_relation_columns([]) ->
+    [];
+
+encode_relation_columns(Spec) when is_list(Spec) ->
+    Res = lists:foldl(
+        fun
+            F({Col, Type}, Acc) when is_atom(Col) ->
+                F({atom_to_binary(Col), Type}, Acc);
+
+            F({Col, Type}, Acc) when is_list(Col) ->
+                F({list_to_binary(Col), Type}, Acc);
+
+            F({Col, undefined}, Acc) when is_binary(Col) ->
+                [[$\s, Col] | Acc];
+
+            F({Col, #{type := Type} = Spec}, Acc) when is_binary(Col) ->
+                Encoded0 = encode_column_type(Type),
+                Encoded =
+                    case maps:get(nullable, Spec, false) of
+                        true ->
+                            [Encoded0, $?];
+                        false ->
+                            Encoded0
+                    end,
+
+                [[$\s, Col, $\s, $=, $\s, Encoded] | Acc];
+
+            F(_, _) ->
+                throw("bad column type specification")
+        end,
+        [],
+        Spec
+    ),
+    lists:reverse(lists:join($,, Res));
+
+encode_relation_columns(Spec) ->
+    throw("bad column specification").
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_column_type(undefined) ->
+    [];
+
+encode_column_type(Type)  when
+Type == any;
+Type == bool;
+Type == bytes;
+Type == json;
+Type == int;
+Type == float;
+Type == string;
+Type == uuid;
+Type == validity ->
+    string:titlecase(atom_to_binary(Type));
+
+encode_column_type({list, Type}) ->
+    [$[, encode_column_type(Type), $]];
+
+encode_column_type({list, Type, Size}) when is_integer(Size) ->
+    [$[, encode_column_type(Type), $;, $\s, integer_to_binary(Size), $]];
+
+encode_column_type({tuple, Types}) when is_list(Types) ->
+    Encoded = [encode_column_type(Type) || Type <- Types],
+    [$(, lists:join($,, Encoded), $)];
+
+encode_column_type({vector, N, Size})
+when (N == 32 orelse N == 64) andalso is_integer(Size) ->
+    [$<, $F, integer_to_list(N), $;, $\s, integer_to_list(Size), $>];
+
+encode_column_type(_) ->
+    throw("invalid column type").
 
 
 

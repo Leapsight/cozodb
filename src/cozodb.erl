@@ -237,7 +237,11 @@ open(Engine, Path) ->
 %% @doc Creates or opens an existing database.
 %% `Path' is ignored when `Engine' is `mem'.
 %% The database has to be explicitely closed using {@link close/1} for Erlang
-%% to release the allocated ErlNIF resources.
+%% to release the allocated ErlNIF resources..
+%% `Opts' is ignored for every engine except `tikv'.
+%% == RocksDB ==
+%% To define options for RocksDB you should make sure a file named "config" is
+%% present on `Path' before you call this function.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open(Engine :: engine(), Path :: path(), Opts :: db_opts()) ->

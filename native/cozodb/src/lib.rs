@@ -279,7 +279,7 @@ impl<'a> Encoder for DataValueWrapper {
                     Ok(json_str) =>
                         (atoms::json(), json_str).encode(env),
                     Err(_) =>
-                        "error: failed to serialize JsonValue".encode(env),
+                        "Failed to serialize JsonValue".encode(env),
                 }
             }
             DataValue::Vec(i) => VectorWrapper(i.clone()).encode(env),

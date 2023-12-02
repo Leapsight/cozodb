@@ -162,6 +162,7 @@
 
 %% APi: System
 -export([relations/1]).
+-export([create_relation/3]).
 -export([remove_relation/2]).
 -export([remove_relations/2]).
 -export([columns/2]).
@@ -461,11 +462,12 @@ create_relation(DbRef, RelName, Spec) when is_list(RelName) ->
     create_relation(DbRef, list_to_binary(RelName), Spec);
 
 create_relation(DbRef, RelName, Spec) when is_map(Spec) ->
-    create_relation(DbRef, RelName, encode_relation_columns(Spec));
+    Encoded = iolist_to_binary(encode_relation_spec(Spec)),
+    create_relation(DbRef, RelName, Encoded);
 
 create_relation(DbRef, RelName, Spec)
 when is_binary(RelName), is_binary(Spec) ->
-    Query = [<<"::create">>, $\s, RelName, Spec],
+    Query = [<<":create">>, $\s, RelName, $\s, Spec],
     run(DbRef, iolist_to_binary(Query)).
 
 

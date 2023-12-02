@@ -262,7 +262,7 @@ when is_atom(Engine), is_binary(Path), is_map(Opts) ->
             2 => "a nonempty string or binary"
         }),
 
-    do_open(atom_to_binary(Engine), Path, map_to_json(Opts)).
+    new(atom_to_binary(Engine), Path, map_to_json(Opts)).
 
 
 %% -----------------------------------------------------------------------------
@@ -275,9 +275,7 @@ when is_atom(Engine), is_binary(Path), is_map(Opts) ->
 -spec close(DbRef :: reference()) -> ok | {error, Reason :: any()}.
 
 close(DbRef) when is_reference(DbRef) ->
-    Res = close_nif(DbRef),
-    timer:sleep(1000),
-    Res.
+    close_nif(DbRef).
 
 
 %% -----------------------------------------------------------------------------
@@ -929,7 +927,7 @@ unregister_callback_nif(_DbRef, _Id) ->
 
 
 %% @private
-do_open(Engine, Path, Opts)
+new(Engine, Path, Opts)
 when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
     try
         %% Call NIF

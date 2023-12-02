@@ -1,38 +1,70 @@
 REBAR3 ?= $(shell test -e `which rebar3` 2>/dev/null && which rebar3 || echo "./rebar3")
 
-.PHONY: deps test build
 
+.PHONY: all
 all: build
 
+.PHONY: build
 build: $(REBAR3)
 	@$(REBAR3) compile
 
+.PHONY: deps
 deps:
 	@$(REBAR3) deps
 
+.PHONY: shell
 shell:
-	@$(REBAR3) cargo clean
+
 	@$(REBAR3) shell
 
+.PHONY: clean
 clean:
+	@$(REBAR3) cargo clean
 	@$(REBAR3) clean
 
+.PHONY: clean-all
 clean-all:
 	rm -rf $(CURDIR)/priv/crates
 	rm -rf $(CURDIR)/_build
 
+.PHONY: distclean
 distclean: clean
 	@$(REBAR3) clean --all
 
+.PHONY: docs
 docs:
 	@$(REBAR3) edoc
 
-test:
-	@$(REBAR3) cargo clean
+.PHONY: test
+eunit:
 	@$(REBAR3) eunit
 
-test-all:
+.PHONY: ct
+ct:
+	@$(REBAR3) ct
+
+.PHONY: xref
+xref:
+	@$(REBAR3) xref
+
+
+.PHONY: cover
+cover:
+	@$(REBAR3) cover
+
+.PHONY: proper
+proper:
+	@$(REBAR3) proper
+
+
+.PHONY: dyalizer
+dyalizer:
+	@$(REBAR3) dyalizer
+
+.PHONY: test
+test:
 	@$(REBAR3) do eunit, ct, cover
 
-release:
+.PHONY: release
+release: xref
 	@$(REBAR3) as prod release

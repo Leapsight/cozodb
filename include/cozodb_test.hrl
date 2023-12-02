@@ -31,6 +31,7 @@
 %%% @author Mathieu Kerjouan
 %%%===================================================================
 % helper to create ok queries
+-define(PATH(Dir, Case), filename:join([Dir, atom_to_list(Case)])).
 -define(QUERY_OK(VAR_QUERY),
         begin
             (fun() ->
@@ -45,16 +46,24 @@
              end)()
         end).
 
--define(COZO_OPEN(DB, ARGS), 
-    {ok, Db} = erlang:apply(Module, open, ARGS),
-    LogFormat = "db: ~p~n"
-    "mfa: {~p,~p,~p}~n"
-    "result: (ok) ~p~n",
-    LogArgs = [DB, Module, open, ARGS],
-    ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs)
-       ).
+-define(QUERY_OK(DB, VAR_QUERY),
+        begin
+            (fun() ->
+                     {ok, Result} = Module:run(DB, VAR_QUERY),
+                     LogFormat = "db: ~p~n"
+                         "query: ~s~n"
+                         "result: ~p~n",
+                     LogArgs = [DB, Engine, Result],
+                     ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs),
+                     ok
+             end)()
+        end).
 
--define(COZO_CLOSE(DB), 
+-define(COZO_OPEN(Module, Engine, Path),
+    Module:open(Engine, Path)
+).
+
+-define(COZO_CLOSE(Module, DB),
     ok = erlang:apply(Module, close, [DB]),
     LogFormat = "db: ~p~n"
     "mfa: {~p,~p,~p}~n"

@@ -456,7 +456,7 @@ relations(DbRef) ->
     DbRef :: reference(),
     RelName :: binary() | list(),
     Spec :: relation_spec()) ->
-    query_return().
+    ok | {error, Reason :: any()} | no_return().
 
 create_relation(DbRef, RelName, Spec) when is_list(RelName) ->
     create_relation(DbRef, list_to_binary(RelName), Spec);
@@ -468,7 +468,17 @@ create_relation(DbRef, RelName, Spec) when is_map(Spec) ->
 create_relation(DbRef, RelName, Spec)
 when is_binary(RelName), is_binary(Spec) ->
     Query = [<<":create">>, $\s, RelName, $\s, Spec],
-    run(DbRef, iolist_to_binary(Query)).
+    try run(DbRef, iolist_to_binary(Query)) of
+        {ok, _} ->
+            ok;
+        {error, <<"Stored relation user conflicts with an existing one">>} ->
+            {error, already_exists};
+        {error, _} = Error ->
+            Error
+    catch
+        throw:Reason ->
+            error(Reason)
+    end.
 
 
 %% -----------------------------------------------------------------------------

@@ -745,7 +745,7 @@ explain(DbRef, Query) when is_list(Query) ->
     explain(DbRef, list_to_binary(Query));
 
 explain(DbRef, Query) when is_binary(Query) ->
-    run(DbRef, <<"::explain", ${, $\s, Query/binary, ${, $\s>>).
+    run(DbRef, <<"::explain", ${, $\s, Query/binary, $\s, $}>>).
 
 
 

@@ -341,15 +341,15 @@ when (Type == lsh orelse Type == fts) andalso is_binary(Col) ->
 encode_index_entry(Type, extractor, _) when Type == lsh; Type == fts ->
     error({badarg, "invalid value for key 'extractor'"});
 
-encode_index_entry(Type, extractor_filter, Expr) when is_list(Expr) ->
-    encode_index_entry(Type, extractor_filter, list_to_binary(Expr));
+encode_index_entry(Type, extract_filter, Expr) when is_list(Expr) ->
+    encode_index_entry(Type, extract_filter, list_to_binary(Expr));
 
-encode_index_entry(Type, extractor_filter, Expr)
+encode_index_entry(Type, extract_filter, Expr)
 when (Type == lsh orelse Type == fts) andalso is_binary(Expr) ->
-    <<"extractor_filter: ", Expr/binary>>;
+    <<"extract_filter: ", Expr/binary>>;
 
-encode_index_entry(Type, extractor_filter, _) when Type == lsh; Type == fts ->
-    error({badarg, "invalid value for key 'extractor_filter'"});
+encode_index_entry(Type, extract_filter, _) when Type == lsh; Type == fts ->
+    error({badarg, "invalid value for key 'extract_filter'"});
 
 encode_index_entry(Type, tokenizer, Tokenizer) when Type == lsh; Type == fts ->
     Encoded = encode_index_tokenizer(Tokenizer),
@@ -358,10 +358,15 @@ encode_index_entry(Type, tokenizer, Tokenizer) when Type == lsh; Type == fts ->
 encode_index_entry(Type, tokenizer, _) when Type == lsh; Type == fts ->
     error({badarg, "invalid value for key 'tokenizer'"});
 
+
 encode_index_entry(Type, filters, Filters)
 when (Type == lsh orelse Type == fts) andalso is_list(Filters) ->
-    Encoded = encode_index_filters(Filters),
-    <<"filters: ", Encoded/binary>>;
+    case encode_index_filters(Filters) of
+        [] ->
+            [];
+        Encoded ->
+            ["filters: [", Encoded, " ]"]
+    end;
 
 encode_index_entry(Type, filters, _) when Type == lsh; Type == fts ->
     error({badarg, "invalid value for key 'filters'"});
@@ -441,6 +446,9 @@ encode_index_tokenizer(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+encode_index_filters([]) ->
+    [];
+
 encode_index_filters(Filters) ->
     lists:join(", ", [encode_index_filter(F) || F <- Filters]).
 
@@ -454,10 +462,10 @@ encode_index_filter(lowercase) ->
     <<"Lowercase">>;
 
 encode_index_filter(alphanumonly) ->
-    <<"Alphanumonly">>;
+    <<"AlphaNumOnly">>;
 
 encode_index_filter(asciifolding) ->
-    <<"Asciifolding">>;
+    <<"AsciiFolding">>;
 
 encode_index_filter({stemmer, Lang}) when is_list(Lang) ->
     encode_index_filter({stemmer, list_to_binary(Lang)});
@@ -686,6 +694,8 @@ encode_hsnw_index_test() ->
         keep_pruned_connections => false
     },
 
+    %% Check required keys: [type, dim, m, fields, ef_construction]
+
     ?assertError(
         {badarg, "invalid specification"},
         iolist_to_binary(encode_index_spec(maps:without([type], Spec)))
@@ -727,6 +737,35 @@ encode_hsnw_index_test() ->
         iolist_to_binary(encode_index_spec(Spec#{dim => 1.0}))
     ),
 
+    ?assertError(
+        {badarg, "value for key 'm' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{m => -1}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'm' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{m => 0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'm' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{m => 1.0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'ef_construction' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{ef_construction => -1}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'ef_construction' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{ef_construction => 0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'ef_construction' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{ef_construction => 1.0}))
+    ),
 
     ?assertEqual(
         <<
@@ -744,8 +783,5 @@ encode_hsnw_index_test() ->
         >>,
         iolist_to_binary(encode_index_spec(Spec))
     ).
-
-
-
 
 -endif.

@@ -1,0 +1,737 @@
+%% =============================================================================
+%%  cozodb_script_utils.erl -
+%%
+%%  Copyright (c) 2023 Leapsight Holdings Limited. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+-module(cozodb_script_utils).
+
+%% API
+-export([encode_relation_spec/1]).
+-export([encode_index_spec/1]).
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec encode_relation_spec(cozodb:relation_spec()) -> iolist() | no_return().
+
+encode_relation_spec(#{keys := [], columns := []}) ->
+    error({badarg, "invalid specification"});
+
+encode_relation_spec(Map) when is_map(Map), not is_map_key(keys, Map) ->
+    encode_relation_spec(Map#{keys => []});
+
+encode_relation_spec(Map) when is_map(Map), not is_map_key(columns, Map) ->
+    encode_relation_spec(Map#{columns => []});
+
+encode_relation_spec(#{keys := Keys, columns := Cols} = Spec) ->
+    EncodedKeys =
+        case encode_relation_columns(Keys) of
+            [] ->
+                [];
+            L ->
+                L ++ [$\s, $=, $>]
+        end,
+
+    EncodedCols = encode_relation_columns(Cols),
+
+    [${, EncodedKeys, EncodedCols, $\s, $}];
+
+encode_relation_spec(_) ->
+    %% Any other value
+    error({badarg, "invalid specification"}).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec encode_index_spec(Spec :: cozodb:index_spec()) -> iolist() | no_return().
+
+encode_index_spec(#{type := covering, fields := Fields0}) when Fields0 =/= [] ->
+    try
+
+        Fields = encode_fields(Fields0),
+        [${, $\s, Fields, $\s, $}]
+
+    catch
+        error:badarg ->
+            Message =
+                "invalid field value in 'fields'. "
+                "Valid values are list, binary or atom",
+            error({badarg, Message})
+    end;
+
+encode_index_spec(#{type := hnsw, dim := _, m := _, fields := _} = Spec)  ->
+    do_encode_index_spec(Spec);
+
+encode_index_spec(#{type := fts, extractor := _, tokenizer := _} = Spec)  ->
+    do_encode_index_spec(Spec);
+
+encode_index_spec(#{
+        type := lsh,
+        extractor := _,
+        tokenizer := _,
+        n_perm := _,
+        n_gram := _,
+        target_threshold := _
+    } = Spec)  ->
+    do_encode_index_spec(Spec);
+
+
+encode_index_spec(_) ->
+    error({badarg, "invalid specification"}).
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_relation_columns([]) ->
+    [];
+
+encode_relation_columns(Spec) when is_list(Spec) ->
+    Res = lists:foldl(
+        fun
+            F({Col, Type}, Acc) when is_atom(Col) ->
+                F({atom_to_binary(Col), Type}, Acc);
+
+            F({Col, Type}, Acc) when is_list(Col) ->
+                F({list_to_binary(Col), Type}, Acc);
+
+            F({Col, undefined}, Acc) when is_binary(Col) ->
+                [[$\s, Col] | Acc];
+
+            F({Col, Type}, Acc)
+            when is_binary(Col) andalso (is_atom(Type) orelse is_tuple(Type)) ->
+                Encoded = encode_column_type(Type),
+                [[$\s, Col, $:, $\s, Encoded] | Acc];
+
+            F({Col, #{type := Type} = Spec}, Acc) when is_binary(Col) ->
+                Encoded0 = encode_column_type(Type),
+                Encoded =
+                    case maps:get(nullable, Spec, false) of
+                        true ->
+                            [Encoded0, $?];
+                        false ->
+                            Encoded0
+                    end,
+
+                [[$\s, Col, $:, $\s, Encoded] | Acc];
+
+            F(Col, Acc) when is_atom(Col); is_list(Col); is_binary(Col) ->
+                %% A column name without type, we coerse to tuple
+                F({Col, undefined}, Acc);
+
+            F(Term, _) ->
+                M = io:format("invalid column type specification '~p'", [Term]),
+                error({badarg, M})
+        end,
+        [],
+        Spec
+    ),
+    lists:reverse(lists:join($,, Res));
+
+encode_relation_columns(Spec) ->
+    error({badarg, "invalid specification"}).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_column_type(undefined) ->
+    <<>>;
+
+encode_column_type(any) ->
+    <<"Any">>;
+
+encode_column_type(bool) ->
+    <<"Bool">>;
+
+encode_column_type(bytes) ->
+    <<"Bytes">>;
+
+encode_column_type(json) ->
+    <<"Json">>;
+
+encode_column_type(int) ->
+    <<"Int">>;
+
+encode_column_type(float) ->
+    <<"Float">>;
+
+encode_column_type(string) ->
+    <<"String">>;
+
+encode_column_type(uuid) ->
+    <<"Uuid">>;
+
+encode_column_type(validity) ->
+    <<"Validity">>;
+
+encode_column_type({list, Type}) ->
+    [$[, encode_column_type(Type), $]];
+
+encode_column_type({list, Type, Size}) when is_integer(Size) ->
+    [$[, encode_column_type(Type), $;, $\s, integer_to_binary(Size), $]];
+
+encode_column_type({tuple, Types}) when is_list(Types) ->
+    Encoded = [encode_column_type(Type) || Type <- Types],
+    [$(, lists:join($,, Encoded), $)];
+
+encode_column_type({vector, N, Size})
+when (N == 32 orelse N == 64) andalso is_integer(Size) ->
+    [$<, $F, integer_to_list(N), $;, $\s, integer_to_list(Size), $>];
+
+encode_column_type(Term) ->
+    M = io:format("invalid column type '~p'", [Term]),
+    error({badarg, M}).
+
+
+%% @private
+encode_fields(Fields) ->
+    lists:join(", ", lists:map(fun term_to_field/1, Fields)).
+
+
+%% @private
+term_to_field(Term) when is_atom(Term) ->
+    atom_to_list(Term);
+
+term_to_field(Term) when is_list(Term); is_binary(Term) ->
+    Term;
+
+term_to_field(_) ->
+    error(badarg).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+do_encode_index_spec(#{type := T} = Spec) ->
+    FolderFun = fun
+        (type, _, Acc) ->
+            %% Ignore
+            Acc;
+        (K, Term, Acc) ->
+            [encode_index_entry(T, K, Term) | Acc]
+    end,
+
+    %% Build iolist. We use sorted iterator so that we can have deterministic
+    %% results required for testing
+    Iter = maps:iterator(Spec, ordered),
+    Entries = lists:join(", ", lists:reverse(maps:fold(FolderFun, [], Iter))),
+    [${, $\s, Entries, $\s, $}].
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_index_entry(hnsw, K, N)
+when (K == dim orelse K == m orelse K == ef_construction)
+andalso is_integer(N) andalso N > 0 ->
+    <<(atom_to_binary(K))/binary, ": ", (integer_to_binary(N))/binary>>;
+
+encode_index_entry(hnsw, K, _) when K == dim; K == m; K == ef_construction ->
+    Cause = lists:flatten(
+        io_lib:format("value for key '~p' is not a positive integer", [K])
+    ),
+    error({badarg, Cause});
+
+encode_index_entry(hnsw, dtype, f32) ->
+    <<"dtype: F32">>;
+
+encode_index_entry(hnsw, dtype, f64) ->
+    <<"dtype: F64">>;
+
+encode_index_entry(hnsw, dtype, _) ->
+    error({badarg, "invalid value for key 'dtype'"});
+
+encode_index_entry(hnsw, fields, Fields) when is_list(Fields) ->
+    Encoded = encode_fields(Fields),
+    ["fields: [", Encoded, "]"];
+
+encode_index_entry(hnsw, fields, _) ->
+    error({badarg, "invalid value for key 'fields'"});
+
+encode_index_entry(hnsw, distance, l2) ->
+    <<"distance: L2">>;
+
+encode_index_entry(hnsw, distance, cosine) ->
+    <<"distance: Cosine">>;
+
+encode_index_entry(hnsw, distance, ip) ->
+    <<"distance: IP">>;
+
+encode_index_entry(hnsw, distance, _) ->
+    error({badarg, "invalid value for key 'distance'"});
+
+encode_index_entry(hnsw, filter, Expr) when is_list(Expr) ->
+    encode_index_entry(hnsw, filter, list_to_binary(Expr));
+
+encode_index_entry(hnsw, filter, Expr) when is_binary(Expr) ->
+    <<"filter: ", Expr/binary>>;
+
+encode_index_entry(hnsw, filter, _) ->
+    error({badarg, "invalid value for key 'filter'"});
+
+encode_index_entry(hnsw, extended_candidates, Val) when is_boolean(Val) ->
+    <<"extended_candidates: ", (atom_to_binary(Val))/binary>>;
+
+encode_index_entry(hnsw, extended_candidates, _) ->
+    error({badarg, "invalid value for key 'extended_candidates'"});
+
+encode_index_entry(hnsw, keep_pruned_connections, Val) when is_boolean(Val) ->
+    <<"keep_pruned_connections: ", (atom_to_binary(Val))/binary>>;
+
+encode_index_entry(hnsw, keep_pruned_connections, _) ->
+    error({badarg, "invalid value for key 'keep_pruned_connections'"});
+
+encode_index_entry(Type, extractor, Col) when is_list(Col) ->
+    encode_index_entry(Type, extractor, list_to_binary(Col));
+
+encode_index_entry(Type, extractor, Col) when is_atom(Col) ->
+    encode_index_entry(Type, extractor, atom_to_binary(Col));
+
+encode_index_entry(Type, extractor, Col)
+when (Type == lsh orelse Type == fts) andalso is_binary(Col) ->
+    <<"extractor: ", Col/binary>>;
+
+encode_index_entry(Type, extractor, _) when Type == lsh; Type == fts ->
+    error({badarg, "invalid value for key 'extractor'"});
+
+encode_index_entry(Type, extractor_filter, Expr) when is_list(Expr) ->
+    encode_index_entry(Type, extractor_filter, list_to_binary(Expr));
+
+encode_index_entry(Type, extractor_filter, Expr)
+when (Type == lsh orelse Type == fts) andalso is_binary(Expr) ->
+    <<"extractor_filter: ", Expr/binary>>;
+
+encode_index_entry(Type, extractor_filter, _) when Type == lsh; Type == fts ->
+    error({badarg, "invalid value for key 'extractor_filter'"});
+
+encode_index_entry(Type, tokenizer, Tokenizer) when Type == lsh; Type == fts ->
+    Encoded = encode_index_tokenizer(Tokenizer),
+    <<"tokenizer: ", Encoded/binary>>;
+
+encode_index_entry(Type, tokenizer, _) when Type == lsh; Type == fts ->
+    error({badarg, "invalid value for key 'tokenizer'"});
+
+encode_index_entry(Type, filters, Filters)
+when (Type == lsh orelse Type == fts) andalso is_list(Filters) ->
+    Encoded = encode_index_filters(Filters),
+    <<"filters: ", Encoded/binary>>;
+
+encode_index_entry(Type, filters, _) when Type == lsh; Type == fts ->
+    error({badarg, "invalid value for key 'filters'"});
+
+encode_index_entry(lsh, K, N)
+when (K == n_perm orelse K == n_gram) andalso is_integer(N) andalso N > 0 ->
+    <<(atom_to_binary(K))/binary, ": ", (integer_to_binary(N))/binary>>;
+
+encode_index_entry(lsh, K, _) when K == dim; K == m; K == ef_construction ->
+    Cause = lists:flatten(
+        io_lib:format("value for key '~p' is not a positive integer", [K])
+    ),
+    error({badarg, Cause});
+
+encode_index_entry(lsh, K, N)
+when (
+    K == target_threshold orelse
+    K == false_positive_weight orelse
+    K ==  false_negative_weight
+    ) andalso is_float(N) andalso N > 0.0 ->
+    <<(atom_to_binary(K))/binary, ": ", (float_to_binary(N))/binary>>;
+
+encode_index_entry(lsh, K, _)
+when K == target_threshold orelse
+K == false_positive_weight orelse
+K ==  false_negative_weight ->
+    Cause = lists:flatten(
+        io_lib:format("value for key '~p' is not a positive float", [K])
+    ),
+    error({badarg, Cause});
+
+encode_index_entry(_, K, _) ->
+    Cause = io_lib:format("unknown key '~s'", [K]),
+    error({badarg, Cause}).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+
+encode_index_tokenizer(raw) ->
+    <<"Raw">>;
+
+encode_index_tokenizer(simple) ->
+    <<"Simple">>;
+
+encode_index_tokenizer(whitespace) ->
+    <<"Whitespace">>;
+
+encode_index_tokenizer(ngram) ->
+    encode_index_tokenizer({ngram, 1, 1, false});
+
+encode_index_tokenizer({ngram, Min, Max, PrefixOnly})
+when is_integer(Min), is_integer(Max), is_boolean(PrefixOnly) ->
+    <<
+        "Ngram(",
+        (integer_to_binary(Min))/binary,
+        (integer_to_binary(Max))/binary,
+        (atom_to_binary(PrefixOnly))/binary,
+        ")"
+    >>;
+
+encode_index_tokenizer({cangjie, Kind})
+when Kind == all; Kind == default; Kind == search; Kind == unicode ->
+    <<"Cangjie(", (atom_to_binary(Kind))/binary, ")">>;
+
+encode_index_tokenizer(_) ->
+    error({badarg, "invalid tokenizer"}).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_index_filters(Filters) ->
+    lists:join(", ", [encode_index_filter(F) || F <- Filters]).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_index_filter(lowercase) ->
+    <<"Lowercase">>;
+
+encode_index_filter(alphanumonly) ->
+    <<"Alphanumonly">>;
+
+encode_index_filter(asciifolding) ->
+    <<"Asciifolding">>;
+
+encode_index_filter({stemmer, Lang}) when is_list(Lang) ->
+    encode_index_filter({stemmer, list_to_binary(Lang)});
+
+encode_index_filter({stemmer, Lang}) when is_binary(Lang) ->
+    <<"Stemmer('", Lang/binary, "')">>;
+
+encode_index_filter({stopwords, Lang}) when is_list(Lang) ->
+    encode_index_filter({stopwords, list_to_binary(Lang)});
+
+encode_index_filter({stopwords, Lang}) when is_binary(Lang) ->
+    <<"Stopwords('", Lang/binary, "')">>;
+
+encode_index_filter(_) ->
+    error({badarg, "on or more values for filters are invalid"}).
+
+
+
+%% =============================================================================
+%% TESTS
+%% =============================================================================
+
+
+
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+encode_relation_columns_test() ->
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_relation_spec(#{})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_relation_spec(#{keys => []})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_relation_spec(#{columns => []})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_relation_spec(#{keys => [], columns => []})
+    ),
+    ?assertEqual(
+        <<"{ a => }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{a, undefined}]
+            })
+        ),
+        "We should support atom column names"
+    ),
+    ?assertEqual(
+        <<"{ a => }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{"a", undefined}]
+            })
+        ),
+        "We should support list column names"
+    ),
+    ?assertEqual(
+        <<"{ a => }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{<<"a">>, undefined}]
+            })
+        ),
+        "We should support binary column names"
+    ),
+    ?assertEqual(
+        <<"{ a: String => }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{a, #{type => string}}]
+            })
+        )
+    ),
+    ?assertEqual(
+        <<"{ a: String => }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{a, string}]
+            })
+        )
+    ),
+    ?assertEqual(
+        <<"{ a: String? => }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{a, #{type => string, nullable => true}}],
+                columns => []
+            })
+        )
+    ),
+    ?assertEqual(
+        <<"{ k: String => v: <F32; 128> }">>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                keys => [{k, string}],
+                columns => [{v, {vector, 32, 128}}]
+            })
+        )
+    ),
+
+    ?assertEqual(
+        <<
+            "{ "
+            "any: Any, "
+            "any_spec: Any, "
+            "any_spec_nullable: Any?, "
+            "bool: Bool, "
+            "bool_spec: Bool, "
+            "bool_spec_nullable: Bool?, "
+            "bytes: Bytes, "
+            "bytes_spec: Bytes, "
+            "bool_spec_nullable: Bool?, "
+            "json: Json, "
+            "json_spec: Json, "
+            "json_spec_nullable: Json?, "
+            "int: Int, "
+            "int_spec: Int, "
+            "int_spec_nullable: Int?, "
+            "float: Float, "
+            "float_spec: Float, "
+            "float_spec_nullable: Float?, "
+            "string: String, "
+            "string_spec: String, "
+            "string_spec_nullable: String?, "
+            "uuid: Uuid, "
+            "uuid_spec: Uuid, "
+            "uuid_spec_nullable: Uuid?, "
+            "validity: Validity, "
+            "validity_spec: Validity, "
+            "validity_spec_nullable: Validity? "
+            "}"
+        >>,
+        iolist_to_binary(
+            encode_relation_spec(#{
+                columns => [
+                    {"any", any},
+                    {"any_spec", #{type => any}},
+                    {"any_spec_nullable", #{type => any, nullable => true}},
+                    {"bool", bool},
+                    {"bool_spec", #{type => bool}},
+                    {"bool_spec_nullable", #{type => bool, nullable => true}},
+                    {"bytes", bytes},
+                    {"bytes_spec", #{type => bytes}},
+                    {"bool_spec_nullable", #{type => bool, nullable => true}},
+                    {"json", json},
+                    {"json_spec", #{type => json}},
+                    {"json_spec_nullable", #{type => json, nullable => true}},
+                    {"int", int},
+                    {"int_spec", #{type => int}},
+                    {"int_spec_nullable", #{type => int, nullable => true}},
+                    {"float", float},
+                    {"float_spec", #{type => float}},
+                    {"float_spec_nullable", #{type => float, nullable => true}},
+                    {"string", string},
+                    {"string_spec", #{type => string}},
+                    {"string_spec_nullable", #{
+                        type => string, nullable => true}
+                    },
+                    {"uuid", uuid},
+                    {"uuid_spec", #{type => uuid}},
+                    {"uuid_spec_nullable", #{type => uuid, nullable => true}},
+                    {"validity", validity},
+                    {"validity_spec", #{type => validity}},
+                    {"validity_spec_nullable", #{
+                        type => validity, nullable => true}
+                    }
+                ]
+            })
+        )
+    ).
+
+
+encode_index_spec_test() ->
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_index_spec(#{})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_index_spec(#{type => foo})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_index_spec(#{type => covering})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_index_spec(#{type => covering, fields => []})
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        encode_index_spec(#{type => covering})
+    ),
+    ?assertEqual(
+        <<"{ a }">>,
+        iolist_to_binary(
+            encode_index_spec(#{type => covering, fields => [a]})
+        )
+    ),
+    ?assertEqual(
+        <<"{ a, b, c }">>,
+        iolist_to_binary(
+            encode_index_spec(#{type => covering, fields => [a, "b", <<"c">>]})
+        )
+    ).
+
+
+encode_hsnw_index_test() ->
+    Spec = #{
+        type => hnsw,
+        dim => 128,
+        m => 50,
+        dtype => f32,
+        distance => l2,
+        fields => [v],
+        filter => <<"k != 'foo'">>,
+        extended_candidates => false,
+        keep_pruned_connections => false
+    },
+
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([type], Spec)))
+    ),
+
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([dim], Spec)))
+    ),
+
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([m], Spec)))
+    ),
+
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([fields], Spec)))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'dim' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{dim => -1}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'dim' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{dim => 0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'dim' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{dim => 1.0}))
+    ),
+
+
+    ?assertEqual(
+        <<
+            "{ "
+            "dim: 128, "
+            "distance: L2, "
+            "dtype: F32, "
+            "extended_candidates: false, "
+            "fields: [v], "
+            "filter: k != 'foo', "
+            "keep_pruned_connections: false, "
+            "m: 50 "
+            "}"
+        >>,
+        iolist_to_binary(encode_index_spec(Spec))
+    ).
+
+
+
+
+-endif.

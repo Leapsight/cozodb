@@ -44,10 +44,12 @@
 -type relation_spec()       ::  binary()
                                 | #{
                                         keys => [
-                                            {column_name(), column_spec()}
+                                            column_name()
+                                            | {column_name(), column_spec()}
                                         ],
                                         columns => [
-                                            {column_name(), column_spec()}
+                                            column_name()
+                                            | {column_name(), column_spec()}
                                         ]
                                     }.
 -type column_spec()         ::  undefined
@@ -84,14 +86,14 @@
                                 | fts_index_spec().
 -type covering_index_spec() ::  #{
                                     type := covering,
-                                    fields => [column_name()]
+                                    fields := [column_name()]
                                 }.
 -type hnsw_index_spec()     ::  #{
                                     type := hnsw,
-                                    dim => pos_integer(),
-                                    m => pos_integer(),
-                                    dtype => string(),
-                                    fields => [column_name()],
+                                    dim := pos_integer(),
+                                    m := pos_integer(),
+                                    dtype => f32 | f64,
+                                    fields := [column_name()],
                                     distance => l2 | cosine | ip,
                                     ef_construction => pos_integer(),
                                     filter => hnsw_filter(),
@@ -105,8 +107,8 @@
                                     tokenizer => tokenizer(),
                                     filters => [token_filter()],
                                     n_perm => pos_integer(),
-                                    target_threshold => float(),
                                     n_gram => pos_integer(),
+                                    target_threshold => float(),
                                     false_positive_weight => float(),
                                     false_negative_weight=> float()
                                 }.
@@ -122,8 +124,11 @@
 -type tokenizer()           ::  raw
                                 | simple
                                 | whitespace
+                                | ngram % {ngram, 1, 1, false}
                                 | {ngram,
-                                    pos_integer(), pos_integer(), boolean()}
+                                    MinGram :: pos_integer(),
+                                    MaxGram :: pos_integer(),
+                                    PrefixOnly :: boolean()}
                                 | {cangjie, default | all | search | unicode}.
 -type token_filter()        ::  lowercase
                                 | alphanumonly
@@ -160,14 +165,15 @@
 -export([run/2]).
 -export([run/3]).
 
-%% APi: System
+%% APi: System Catalogue
 -export([relations/1]).
 -export([create_relation/3]).
 -export([remove_relation/2]).
 -export([remove_relations/2]).
 -export([columns/2]).
 -export([indices/2]).
--export([create_index/3]).
+-export([create_index/4]).
+-export([drop_index/2]).
 -export([drop_index/3]).
 
 %% API: Utils
@@ -185,6 +191,13 @@
 %% -export([import_from_backup/2]).
 %% -export([register_fixed_rule/2]).
 %% -export([unregister_fixed_rule/2]).
+
+%% API: Monitor
+-export([running/1]).
+-export([kill/2]).
+
+%% API: Maintenance
+-export([compact/1]).
 
 
 -on_load(init/0).
@@ -454,30 +467,32 @@ relations(DbRef) ->
 %% -----------------------------------------------------------------------------
 -spec create_relation(
     DbRef :: reference(),
-    RelName :: binary() | list(),
+    RelName :: atom() | binary() | list(),
     Spec :: relation_spec()) ->
     ok | {error, Reason :: any()} | no_return().
+
+create_relation(DbRef, RelName, Spec) when is_atom(RelName) ->
+    create_relation(DbRef, atom_to_binary(RelName), Spec);
 
 create_relation(DbRef, RelName, Spec) when is_list(RelName) ->
     create_relation(DbRef, list_to_binary(RelName), Spec);
 
-create_relation(DbRef, RelName, Spec) when is_map(Spec) ->
-    Encoded = iolist_to_binary(encode_relation_spec(Spec)),
-    create_relation(DbRef, RelName, Encoded);
+create_relation(DbRef, RelName, Spec) when is_binary(RelName), is_map(Spec) ->
+    Encoded =
+        try
+            cozodb_script_utils:encode_relation_spec(Spec)
+        catch
+            error:{EReason, Message} ->
+                ?ERROR(EReason, [DbRef, RelName, Spec], #{3 => Message})
+        end,
 
-create_relation(DbRef, RelName, Spec)
-when is_binary(RelName), is_binary(Spec) ->
-    Query = [<<":create">>, $\s, RelName, $\s, Spec],
-    try run(DbRef, iolist_to_binary(Query)) of
+    Query = [<<":create">>, $\s, RelName, $\s, Encoded],
+
+    case run(DbRef, iolist_to_binary(Query)) of
         {ok, _} ->
             ok;
-        {error, <<"Stored relation user conflicts with an existing one">>} ->
-            {error, already_exists};
-        {error, _} = Error ->
-            Error
-    catch
-        throw:Reason ->
-            error(Reason)
+        {error, Reason} ->
+            {error, format_reason(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -492,7 +507,12 @@ remove_relation(DbRef, RelName) when is_list(RelName) ->
     remove_relation(DbRef, list_to_binary(RelName));
 
 remove_relation(DbRef, RelNames) ->
-    run(DbRef, <<"::remove", $\s, RelNames/binary>>).
+    case run(DbRef, <<"::remove", $\s, RelNames/binary>>) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            {error, format_reason(?FUNCTION_NAME, Reason)}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -500,11 +520,16 @@ remove_relation(DbRef, RelNames) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_relations(DbRef :: reference(), RelNames :: [binary() | list()]) ->
-    query_return().
+    ok | {error, Reason :: any()}.
 
 remove_relations(DbRef, RelNames0) ->
     RelNames = iolist_to_binary(lists:join(", ", RelNames0)),
-    run(DbRef, <<"::remove", $\s, RelNames/binary>>).
+    case run(DbRef, <<"::remove", $\s, RelNames/binary>>) of
+        {ok, _} ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -587,43 +612,40 @@ indices(DbRef, RelName) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec create_index(
-    DbRef :: reference(), RelName :: binary() | list(), Spec :: index_spec()) -> query_return().
+    DbRef :: reference(),
+    RelName :: binary() | list(),
+    Name :: binary() | list(),
+    Spec :: index_spec()) -> query_return().
 
-create_index(DbRef, RelName, Spec) ->
-    Query = iolist_to_binary(create_index_query(RelName, Spec)),
-    run(DbRef, Query).
+create_index(DbRef, RelName, Name, #{type := Type} = Spec0) when is_map(Spec0) ->
+    Spec = cozodb_script_utils:encode_index_spec(Spec0),
+    IndexOp = index_type_op(Type),
+    Query = iolist_to_binary([
+        $:, $:, IndexOp, $\s, "create", $\s, RelName, $:, Name, $\s, Spec
+    ]),
+    run(DbRef, Query);
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec create_index_query(RelName :: binary() | list(), Spec :: index_spec()) ->
-    iolist().
-
-create_index_query(RelName, Spec) when is_list(RelName) ->
-    create_index_query(list_to_binary(RelName), Spec);
-
-create_index_query(RelName, #{type := covering, fields := L}) ->
-    [
-        "::index create", $\s, RelName,
-        ${, $\s, lists:join(", ", L), $\s, $}
-    ];
-
-create_index_query(_RelName, #{type := fts} = Spec) ->
-    error(not_implemented);
-
-create_index_query(_RelName, #{type := lsh} = Spec) ->
-    error(not_implemented);
-
-create_index_query(_RelName, #{type := hnsw} = Spec) ->
-    error(not_implemented);
-
-create_index_query(RelName, #{type := _} = Spec) ->
-    ?ERROR(badarg, [RelName, Spec], #{
-        2 => "invalid value for field type"
+create_index(DbRef, RelName, Name, Spec) ->
+    ?ERROR(badarg, [DbRef, RelName, Name, Spec], #{
+        4 =>
+            "invalid value for field 'type'. "
+            "Valid values are 'covering', 'hnsw', 'lsh' and 'fts'"
     }).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Drop index with fully qualified name.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec drop_index(DbRef :: reference(), FQN :: binary() | list()) ->
+    query_return().
+
+drop_index(DbRef, FQN) when is_list(FQN) ->
+    drop_index(DbRef, list_to_binary(FQN));
+
+drop_index(DbRef, FQN) when is_binary(FQN) ->
+    Cmd = <<"::index drop", $\s, FQN/binary>>,
+    run(DbRef, Cmd).
 
 
 %% -----------------------------------------------------------------------------
@@ -633,17 +655,16 @@ create_index_query(RelName, #{type := _} = Spec) ->
 -spec drop_index(
     DbRef :: reference(),
     RelName :: binary() | list(),
-    Spec :: binary() | list()) -> query_return().
+    Name :: binary() | list()) -> query_return().
 
-drop_index(DbRef, RelName, Spec) when is_list(RelName) ->
-    drop_index(DbRef, list_to_binary(RelName), Spec);
+drop_index(DbRef, RelName, Name) when is_list(RelName) ->
+    drop_index(DbRef, list_to_binary(RelName), Name);
 
-drop_index(DbRef, RelName, Spec) when is_list(Spec) ->
-    drop_index(DbRef, RelName, list_to_binary(Spec));
+drop_index(DbRef, RelName, Name) when is_list(Name) ->
+    drop_index(DbRef, RelName, list_to_binary(Name));
 
-drop_index(DbRef, RelName, Spec) ->
-    Cmd = <<"::index drop", $\s, RelName/binary, ${, $\s, Spec/binary, $\s, $}>>,
-    run(DbRef, Cmd).
+drop_index(DbRef, RelName, Name) when is_binary(RelName), is_binary(Name) ->
+    drop_index(DbRef, <<RelName/binary, ":", Name/binary>>).
 
 
 %% -----------------------------------------------------------------------------
@@ -725,6 +746,56 @@ when is_reference(DbRef), is_binary(RelName)->
 unregister_callback(DbRef, Id)
 when is_reference(DbRef), is_integer(Id)->
     unregister_callback_nif(DbRef, Id).
+
+
+%% =============================================================================
+%% API: Monitor
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec running(DbRef :: reference()) -> query_result().
+
+running(DbRef) ->
+    run(DbRef, <<"::running">>).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Kill the running query associated with identifier `Id'.
+%% See {@link running/1} to get the list of running queries and their
+%% identifiers.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec kill(DbRef :: reference(), Id :: binary()) -> query_result().
+
+kill(DbRef, Id) when is_binary(Id) ->
+    run(DbRef, <<"::kill", $\s, Id/binary>>).
+
+
+
+%% =============================================================================
+%% API: Maintenance
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec compact(DbRef :: reference()) -> ok | {error, Reason :: any()}.
+
+compact(DbRef) ->
+    case run(DbRef, <<"::compact">>) of
+        {ok, _} ->
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
 
 
 
@@ -954,6 +1025,51 @@ when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+format_reason(Op, Reason) when is_binary(Reason) ->
+    %% #{FUNCTION_NAME => [{MatchRule, Cozo string pattern, Return]}
+    AllRules = #{
+        create_relation => [
+            {match_suffix,
+                <<"conflicts with an existing one">>, already_exists}
+        ],
+        remove_relation => [
+            {match_prefix,
+                <<"Cannot find requested stored relation">>, not_found}
+        ]
+    },
+
+    %% Predicated used in lists:search
+    Pred = fun
+        ({match_suffix, Pattern, Format}) ->
+            Suffix = binary:longest_common_suffix([Reason, Pattern]),
+            Suffix == byte_size(Pattern);
+        ({match_prefix, Pattern, Format}) ->
+            Suffix = binary:longest_common_prefix([Reason, Pattern]),
+            Suffix == byte_size(Pattern);
+        (_) ->
+            false
+    end,
+
+    %% Get rules associated with Op
+    OpRules = maps:get(Op, AllRules, []),
+
+    %% Try to match rules and return the term defined by the rule,
+    %% otherwsie return Reason
+    case lists:search(Pred, OpRules) of
+        {value, {_, _, Return}} ->
+            Return;
+        false ->
+            Reason
+    end;
+
+format_reason(_, Reason) ->
+    Reason.
+
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -973,18 +1089,36 @@ engine_opts(Other) ->
     #{}.
 
 
+%% @private
 index_type_op(covering) -> <<"index">>;
 index_type_op(fts) -> <<"fts">>;
 index_type_op(hnsw) -> <<"hnsw">>;
 index_type_op(lhs) -> <<"lhs">>;
 index_type_op(_) -> error(badarg).
 
+
+
 %% @private
--spec map_to_json(Term :: map()) -> binary().
+-spec map_to_json(Term :: map()) -> binary() | no_return().
 
 map_to_json(Term) when is_map(Term) ->
     Encoder = json_encoder(),
-    Encoder:encode(Term).
+    try
+        Encoder:encode(Term)
+    catch
+        error:function_clause:Stacktrace ->
+            Cause =
+                case Stacktrace of
+                    [{thoas_encode, key, [Key, _], _} | _] ->
+                        lists:flatten(
+                            io_lib:format("invalid JSON key '~p'", [Key])
+                        );
+                    _ ->
+                        "json encoding failed"
+                end,
+            error({badarg, Cause})
+    end.
+
 
 
 %%--------------------------------------------------------------------
@@ -1005,112 +1139,6 @@ json_encoder() ->
 
 %% json_decoder() ->
 %%     application:get_env(?APP, json_parser, thoas).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec encode_relation_spec(map()) -> iolist().
-
-encode_relation_spec(Spec) when is_map(Spec) ->
-    Keys =
-        case encode_relation_columns(maps:get(keys, Spec, [])) of
-            [] ->
-                [];
-            L ->
-                L ++ [$\s, $=, $>]
-        end,
-
-    [
-        ${, $\s,
-        Keys,
-        encode_relation_columns(maps:get(columns, Spec, [])),
-        $\s, $}
-    ].
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-encode_relation_columns([]) ->
-    [];
-
-encode_relation_columns(Spec) when is_list(Spec) ->
-    Res = lists:foldl(
-        fun
-            F({Col, Type}, Acc) when is_atom(Col) ->
-                F({atom_to_binary(Col), Type}, Acc);
-
-            F({Col, Type}, Acc) when is_list(Col) ->
-                F({list_to_binary(Col), Type}, Acc);
-
-            F({Col, undefined}, Acc) when is_binary(Col) ->
-                [[$\s, Col] | Acc];
-
-            F({Col, #{type := Type} = Spec}, Acc) when is_binary(Col) ->
-                Encoded0 = encode_column_type(Type),
-                Encoded =
-                    case maps:get(nullable, Spec, false) of
-                        true ->
-                            [Encoded0, $?];
-                        false ->
-                            Encoded0
-                    end,
-
-                [[$\s, Col, $\s, $=, $\s, Encoded] | Acc];
-
-            F(_, _) ->
-                throw("bad column type specification")
-        end,
-        [],
-        Spec
-    ),
-    lists:reverse(lists:join($,, Res));
-
-encode_relation_columns(Spec) ->
-    throw("bad column specification").
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-encode_column_type(undefined) ->
-    [];
-
-encode_column_type(Type)  when
-Type == any;
-Type == bool;
-Type == bytes;
-Type == json;
-Type == int;
-Type == float;
-Type == string;
-Type == uuid;
-Type == validity ->
-    string:titlecase(atom_to_binary(Type));
-
-encode_column_type({list, Type}) ->
-    [$[, encode_column_type(Type), $]];
-
-encode_column_type({list, Type, Size}) when is_integer(Size) ->
-    [$[, encode_column_type(Type), $;, $\s, integer_to_binary(Size), $]];
-
-encode_column_type({tuple, Types}) when is_list(Types) ->
-    Encoded = [encode_column_type(Type) || Type <- Types],
-    [$(, lists:join($,, Encoded), $)];
-
-encode_column_type({vector, N, Size})
-when (N == 32 orelse N == 64) andalso is_integer(Size) ->
-    [$<, $F, integer_to_list(N), $;, $\s, integer_to_list(Size), $>];
-
-encode_column_type(_) ->
-    throw("invalid column type").
 
 
 

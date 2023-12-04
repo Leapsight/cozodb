@@ -38,7 +38,7 @@
 -include_lib("stdlib/include/assert.hrl").
 -include("cozodb_test.hrl").
 
--define(PRIV_DIR_TEST, "./cozodb_test_SUITE").
+-define(DB_DIR_TEST, "./cozodb_test_SUITE_data").
 %% -define(ENGINES, [mem, sqlite, rocksdb]).
 -define(ENGINES, [mem, rocksdb]).
 %%--------------------------------------------------------------------
@@ -54,10 +54,10 @@ suite() -> [{timetrap,{seconds,30}}].
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    ok = application:set_env(cozodb, priv_dir, ?PRIV_DIR_TEST),
+    ok = application:set_env(cozodb, priv_dir, ?DB_DIR_TEST),
     case proplists:get_value(create_path, Config, true) of
         true -> 
-            ok = file:make_dir(?PRIV_DIR_TEST);
+            ok = file:make_dir(?DB_DIR_TEST);
         _ ->
             ok
     end,
@@ -70,7 +70,7 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     case proplists:get_value(clean_path, Config, true) of
         false -> ok;
-        _ -> ok = file:del_dir_r(?PRIV_DIR_TEST)
+        _ -> ok = file:del_dir_r(?DB_DIR_TEST)
     end,
     ok = application:unset_env(cozodb, data_dir),
     ok.
@@ -102,7 +102,7 @@ end_per_group(_GroupName, _Config) ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    Path = filename:join([?PRIV_DIR_TEST, TestCase]),
+    Path = filename:join([?DB_DIR_TEST, TestCase]),
     file:make_dir(Path),
     [{db_path, Path} | Config].
 
@@ -464,7 +464,8 @@ tutorial_graphs_fun({Module, Engine}) ->
 air_routes() -> [].
 
 air_routes(Config) ->
-    DataDir = proplists:get_value(data_dir, Config, "test/cozo_SUITE_data"),
+    %% Test data sources directory
+    DataDir = proplists:get_value(data_dir, Config, "test/cozodb_SUITE_data"),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
     Mapping = [ {DataDir, M,E} || M <- Modules, E <- Engines ],
@@ -772,21 +773,30 @@ maintenance_commands_fun({Module, Engine}) ->
 
     {ok, _} = Module:run(Db, "?[] <- [[1,2,3]]"),
 
-    {ok, _} = Module:create_relation(Db, "stored", "c1"),
-    {ok, _} = Module:create_relation(Db, "stored2", ["c1","c2","c3"]),
-    {ok, _} = Module:create_relation(Db, stored3, c1),
-    {ok, _} = Module:create_relation(Db, stored4, [c1,c2,c3]),
-    {ok, _} = Module:create_relation(Db, stored5, ["c1",c2,"c3",c4]),
-
+    ok = Module:create_relation(Db, "stored", #{
+        columns => ["c1"]
+    }),
+    ok = Module:create_relation(Db, "stored2", #{
+        columns => [c1, "c2", <<"c3">>]
+    }),
+    ok = Module:create_relation(Db, stored3, #{
+        columns => [c1]
+    }),
+    ok = Module:create_relation(Db, stored4, #{
+        columns => [c1, c2, c3]
+    }),
+    ok = Module:create_relation(Db, stored5, #{
+        columns => ["c1", c2, "c3", c4]
+    }),
     % import/export relations
     % wrong json lead to an error
-    {error, _} = Module:import_relations(Db, #{ {} => {} }),
+    {error, _} = Module:import(Db, #{ {} => {} }),
     Relations = #{ stored => #{ headers => [c1,c2], rows => [] }},
-    {ok, _} = Module:import_relations(Db, Relations),
+    {ok, _} = Module:import(Db, Relations),
 
     % wrong json lead to an error
-    {error, _} = Module:export_relations(Db, #{ {} => {} }),
-    {ok, _} = Module:export_relations(Db, #{ relations => [stored] }),
+    {error, _} = Module:export(Db, #{ {} => {} }),
+    {ok, _} = Module:export(Db, #{ relations => [stored] }),
 
     % backup/restore database
     BackupPath = DbPath ++ "_" ++ EngineName ++ ".backup",
@@ -800,11 +810,11 @@ maintenance_commands_fun({Module, Engine}) ->
     % {ok, _} = Module:import_backup(Db, BackupJson),
 
     % delete relation one by one
-    {ok, _} = Module:delete_relation(Db, "stored"),
-    {ok, _} = Module:delete_relation(Db, "stored2"),
+    ok = Module:remove_relation(Db, "stored"),
+    ok = Module:remove_relation(Db, "stored2"),
 
     % delete many relations
-    {ok, _} = Module:delete_relations(Db, ["stored3", "stored4", "stored5"]),
+    ok = Module:remove_relations(Db, ["stored3", "stored4", "stored5"]),
 
     ok = Module:close(Db).
 
@@ -824,21 +834,31 @@ system_commands_fun({Module, Engine}) ->
     #{path := _DbPath} = Module:info(Db),
 
     % create relations
-    {ok, _} = Module:create_relation(Db, "stored", "c1"),
-    {ok, _} = Module:create_relation(Db, "stored2", ["c1","c2","c3"]),
-    {ok, _} = Module:create_relation(Db, stored3, c1),
-    {ok, _} = Module:create_relation(Db, stored4, [c1,c2,c3]),
-    {ok, _} = Module:create_relation(Db, stored5, ["c1",c2,"c3",c4]),
+    ok = Module:create_relation(Db, "stored", #{
+        columns => ["c1"]
+    }),
+    ok = Module:create_relation(Db, "stored2", #{
+        columns => [c1, "c2", <<"c3">>]
+    }),
+    ok = Module:create_relation(Db, stored3, #{
+        columns => [c1]
+    }),
+    ok = Module:create_relation(Db, stored4, #{
+        columns => [c1, c2, c3]
+    }),
+    ok = Module:create_relation(Db, stored5, #{
+        columns => ["c1", c2, "c3", c4]
+    }),
 
     % list available relations
-    {ok, _} = Module:list_relations(Db),
+    {ok, _} = Module:relations(Db),
 
     % explain a query
     {ok, _} = Module:explain(Db, "?[] <- [[1,2,3]]"),
 
     % list columns and indices
-    {ok, _} = Module:list_columns(Db, "stored"),
-    {ok, _} = Module:list_indices(Db, "stored"),
+    {ok, _} = Module:columns(Db, "stored"),
+    {ok, _} = Module:indices(Db, "stored"),
 
     % error during describe
     % {ok, _} = Module:describe(Db, "stored", "test").
@@ -860,8 +880,8 @@ system_commands_fun({Module, Engine}) ->
     {ok, _} = Module:set_access_levels(Db, normal, ["stored2", "stored3"]),
 
     % remove relations
-    {ok, _} = Module:delete_relation(Db, "stored"),
-    {ok, _} = Module:delete_relations(Db, ["stored2", "stored3", "stored4"]),
+    ok = Module:remove_relation(Db, "stored"),
+    ok = Module:remove_relations(Db, ["stored2", "stored3", "stored4"]),
 
     % close database
     ok = Module:close(Db).
@@ -880,9 +900,12 @@ index(Config) ->
 index_fun({Module, Engine}) ->
     {ok, Db} = Module:open(Engine),
     {ok, _} = Module:run(Db, ":create r {a => b}"),
-    {ok, _} = Module:create_index(Db, "r:idx", "b, a"),
-    {ok, _} = Module:list_indices(Db, "r"),
-    {ok, _} = Module:delete_index(Db, "r:idx"),
+    {ok, _} = Module:create_index(Db, "r", "idx", #{
+        type => covering,
+        fields => [b, a]
+    }),
+    {ok, _} = Module:indices(Db, "r"),
+    {ok, _} = Module:drop_index(Db, "r:idx"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------
@@ -898,20 +921,23 @@ hnsw(Config) ->
 
 hnsw_fun({Module, Engine}) ->
     {ok, Db} = Module:open(Engine),
-    {ok, _} = Module:run(Db, ":create table {k: String => v: <F32; 128>}"),
-    {ok, _} = Module:create_hnsw(Db, "table:index_name", "{"
-                                 "dim: 128, "
-                                 "m: 50, "
-                                 "dtype: F32, "
-                                 "fields: [v], "
-                                 "distance: L2, "
-                                 "ef_construction: 20, "
-                                 "filter: k != 'foo', "
-                                 "extend_candidates: false, "
-                                 "keep_pruned_connections: false, "
-                                 "}"),
+    ok = cozodb:create_relation(Db, "table_hnsw_fun", #{
+        keys => [{k, string}],
+        columns => [{v, {vector, 32, 128}}]
+    }),
+    {ok, _} = Module:create_index(Db, "table_hnsw_fun", "my_hsnw_index", #{
+        type => hnsw,
+        dim => 128,
+        m => 50,
+        dtype => f32,
+        distance => l2,
+        fields => [v],
+        filter => <<"k != 'foo'">>,
+        extended_candidates => false,
+        keep_pruned_connections => false
+    }),
     % @todo: fix crash
-    % {ok, _} = cozodb:delete_hnsw(Db, "table:index_name"),
+    % {ok, _} = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------

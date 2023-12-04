@@ -140,6 +140,7 @@ type Registrations = Arc<Mutex<HashMap<u32, Registration>>>;
 // We use it because Rust's standard library doesn't support static
 // variables with non-constant initializers directly.
 lazy_static! {
+
     // Required so that we can close a database from Erlang
     static ref HANDLES: Handles =
         Handles {

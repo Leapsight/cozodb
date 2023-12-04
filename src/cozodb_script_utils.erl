@@ -84,7 +84,13 @@ encode_index_spec(#{type := covering, fields := Fields0}) when Fields0 =/= [] ->
             error({badarg, Message})
     end;
 
-encode_index_spec(#{type := hnsw, dim := _, m := _, fields := _} = Spec)  ->
+encode_index_spec(#{
+        type := hnsw,
+        dim := _,
+        m := _,
+        ef_construction := _,
+        fields := _
+    } = Spec)  ->
     do_encode_index_spec(Spec);
 
 encode_index_spec(#{type := fts, extractor := _, tokenizer := _} = Spec)  ->
@@ -310,11 +316,11 @@ encode_index_entry(hnsw, filter, Expr) when is_binary(Expr) ->
 encode_index_entry(hnsw, filter, _) ->
     error({badarg, "invalid value for key 'filter'"});
 
-encode_index_entry(hnsw, extended_candidates, Val) when is_boolean(Val) ->
-    <<"extended_candidates: ", (atom_to_binary(Val))/binary>>;
+encode_index_entry(hnsw, extend_candidates, Val) when is_boolean(Val) ->
+    <<"extend_candidates: ", (atom_to_binary(Val))/binary>>;
 
-encode_index_entry(hnsw, extended_candidates, _) ->
-    error({badarg, "invalid value for key 'extended_candidates'"});
+encode_index_entry(hnsw, extend_candidates, _) ->
+    error({badarg, "invalid value for key 'extend_candidates'"});
 
 encode_index_entry(hnsw, keep_pruned_connections, Val) when is_boolean(Val) ->
     <<"keep_pruned_connections: ", (atom_to_binary(Val))/binary>>;
@@ -364,7 +370,7 @@ encode_index_entry(lsh, K, N)
 when (K == n_perm orelse K == n_gram) andalso is_integer(N) andalso N > 0 ->
     <<(atom_to_binary(K))/binary, ": ", (integer_to_binary(N))/binary>>;
 
-encode_index_entry(lsh, K, _) when K == dim; K == m; K == ef_construction ->
+encode_index_entry(lsh, K, _) when K == n_perm; K == n_gram ->
     Cause = lists:flatten(
         io_lib:format("value for key '~p' is not a positive integer", [K])
     ),
@@ -671,11 +677,12 @@ encode_hsnw_index_test() ->
         type => hnsw,
         dim => 128,
         m => 50,
+        ef_construction => 20,
         dtype => f32,
         distance => l2,
         fields => [v],
         filter => <<"k != 'foo'">>,
-        extended_candidates => false,
+        extend_candidates => false,
         keep_pruned_connections => false
     },
 
@@ -697,6 +704,12 @@ encode_hsnw_index_test() ->
     ?assertError(
         {badarg, "invalid specification"},
         iolist_to_binary(encode_index_spec(maps:without([fields], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(
+            encode_index_spec(maps:without([ef_construction], Spec))
+        )
     ),
 
     ?assertError(
@@ -721,7 +734,8 @@ encode_hsnw_index_test() ->
             "dim: 128, "
             "distance: L2, "
             "dtype: F32, "
-            "extended_candidates: false, "
+            "ef_construction: 20, "
+            "extend_candidates: false, "
             "fields: [v], "
             "filter: k != 'foo', "
             "keep_pruned_connections: false, "

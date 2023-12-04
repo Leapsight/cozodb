@@ -929,11 +929,12 @@ hnsw_fun({Module, Engine}) ->
         type => hnsw,
         dim => 128,
         m => 50,
+        ef_construction => 20,
         dtype => f32,
         distance => l2,
         fields => [v],
         filter => <<"k != 'foo'">>,
-        extended_candidates => false,
+        extend_candidates => false,
         keep_pruned_connections => false
     }),
     % @todo: fix crash

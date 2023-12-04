@@ -92,10 +92,10 @@
                                     type := hnsw,
                                     dim := pos_integer(),
                                     m := pos_integer(),
-                                    dtype => f32 | f64,
+                                    ef_construction := pos_integer(),
                                     fields := [column_name()],
+                                    dtype => f32 | f64,
                                     distance => l2 | cosine | ip,
-                                    ef_construction => pos_integer(),
                                     filter => hnsw_filter(),
                                     extend_candidates => boolean(),
                                     keep_pruned_connections => boolean()

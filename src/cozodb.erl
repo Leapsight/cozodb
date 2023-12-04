@@ -146,11 +146,11 @@
 -type query_result()        ::  #{
                                     headers := [column_name()],
                                     rows := [row()],
-                                    next => [row()] | undefined,
+                                    next => [row()] | null,
                                     took => float() % secs
                                 }.
 -type row()                 ::  list(value()).
--type value()               ::  nil | boolean() | integer() | float() | list()
+-type value()               ::  null | boolean() | integer() | float() | list()
                                 | binary() | validity() | json().
 -type json()                ::  {json, binary()}.
 -type validity()            ::  {float(), boolean()}.
@@ -183,12 +183,13 @@
 
 %% API: Operations
 -export([export/2]).
+-export([export/3]).
 -export([import/2]).
 -export([register_callback/2]).
 -export([unregister_callback/2]).
-%% -export([backup_db/2]).
-%% -export([restore_backup/2]).
-%% -export([import_from_backup/2]).
+-export([backup/2]).
+-export([restore/2]).
+-export([import_from_backup/3]).
 %% -export([register_fixed_rule/2]).
 %% -export([unregister_fixed_rule/2]).
 
@@ -286,10 +287,10 @@ when is_atom(Engine), is_binary(Path), is_map(Opts) ->
 %% might fail.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(DbRef :: reference()) -> ok | {error, Reason :: any()}.
+-spec close(Db :: reference()) -> ok | {error, Reason :: any()}.
 
-close(DbRef) when is_reference(DbRef) ->
-    close_nif(DbRef).
+close(Db) when is_reference(Db) ->
+    close_nif(Db).
 
 
 %% -----------------------------------------------------------------------------
@@ -299,30 +300,30 @@ close(DbRef) when is_reference(DbRef) ->
 %% might fail.
 %% @end
 %% -----------------------------------------------------------------------------
--spec info(DbRef :: reference()) -> info().
+-spec info(Db :: reference()) -> info().
 
-info(DbRef) when is_reference(DbRef) ->
-    info_nif(DbRef).
+info(Db) when is_reference(Db) ->
+    info_nif(Db).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec run(DbRef :: reference(), Script :: list() | binary()) -> query_return().
+-spec run(Db :: reference(), Script :: list() | binary()) -> query_return().
 
-run(DbRef, Script) when Script == ""; Script == <<>> ->
-    ?ERROR(badarg, [DbRef, Script], #{
+run(Db, Script) when Script == ""; Script == <<>> ->
+    ?ERROR(badarg, [Db, Script], #{
         1 => "script cannot be empty"
     });
 
-run(DbRef, Script) when is_list(Script) ->
-    run(DbRef, list_to_binary(Script));
+run(Db, Script) when is_list(Script) ->
+    run(Db, list_to_binary(Script));
 
-run(DbRef, Script) when is_reference(DbRef), is_binary(Script) ->
+run(Db, Script) when is_reference(Db), is_binary(Script) ->
     Params = map_to_json(#{}),
     ReadOnly = false,
-    run_script_nif(DbRef, Script, Params, ReadOnly).
+    run_script_nif(Db, Script, Params, ReadOnly).
 
 
 %% -----------------------------------------------------------------------------
@@ -330,32 +331,32 @@ run(DbRef, Script) when is_reference(DbRef), is_binary(Script) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec run(
-    DbRef :: reference(), Script :: list() | binary(), Opts :: query_opts()) -> query_return().
+    Db :: reference(), Script :: list() | binary(), Opts :: query_opts()) -> query_return().
 
-run(DbRef, Script, Opts) when is_list(Script) ->
-    run(DbRef, list_to_binary(Script), Opts);
+run(Db, Script, Opts) when is_list(Script) ->
+    run(Db, list_to_binary(Script), Opts);
 
-run(DbRef, Script, #{encoding := json} = Opts)
-when is_reference(DbRef), is_binary(Script) ->
+run(Db, Script, #{encoding := json} = Opts)
+when is_reference(Db), is_binary(Script) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
-    run_script_json_nif(DbRef, Script, Params, ReadOnly);
+    run_script_json_nif(Db, Script, Params, ReadOnly);
 
-run(DbRef, Script, #{encoding := map} = Opts)
-when is_reference(DbRef), is_binary(Script) ->
+run(Db, Script, #{encoding := map} = Opts)
+when is_reference(Db), is_binary(Script) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
-    run_script_str_nif(DbRef, Script, Params, ReadOnly);
+    run_script_str_nif(Db, Script, Params, ReadOnly);
 
-run(DbRef, Script, Opts)
-when is_reference(DbRef), is_binary(Script), is_map(Opts) ->
+run(Db, Script, Opts)
+when is_reference(Db), is_binary(Script), is_map(Opts) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     %% telemetry:execute(
     %% [cozodb, query, start],
     %% #{system_time => erlang:system_time(), script => Script}
     %% ),
-    run_script_nif(DbRef, Script, Params, ReadOnly).
+    run_script_nif(Db, Script, Params, ReadOnly).
 
 
 
@@ -410,11 +411,11 @@ import(Db, Relations) when is_reference(Db), is_binary(Relations) ->
 %% containing the `headers' and `rows' of the relation.
 %% @end
 %% -----------------------------------------------------------------------------
--spec export(Db :: reference(), Relations :: binary() | relations()) ->
+-spec export(Db :: reference(), RelNames :: [relation_name()] | binary()) ->
     ok | {error, Reason :: any()}.
 
-export(Db, Relations) ->
-    export(Db, Relations, #{}).
+export(Db, RelNames) ->
+    export(Db, RelNames, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -428,20 +429,64 @@ export(Db, Relations) ->
 %% -----------------------------------------------------------------------------
 -spec export(
     Db :: reference(),
-    Relations :: binary() | relations(),
+    RelNames :: [relation_name()] | binary(),
     Opts :: export_opts()) ->
+    {ok, relations() | binary()} | {error, Reason :: any()}.
+
+export(Db, RelNames, #{encoding := json})
+when is_reference(Db), is_binary(RelNames) ->
+    export_relations_json_nif(Db, RelNames);
+
+export(Db, RelNames, #{encoding := json})
+when is_reference(Db), is_list(RelNames) ->
+    export_relations_json_nif(Db, RelNames);
+
+export(Db, RelNames, _) when is_reference(Db), is_list(RelNames) ->
+    export_relations_nif(Db, RelNames).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec backup(Db :: reference(), Path :: path()) ->
     ok | {error, Reason :: any()}.
 
-export(Db, Relations, Opts) when is_reference(Db), is_map(Relations) ->
-    export(Db, map_to_json(Relations), Opts);
+backup(Db, Path) when is_list(Path), Path =/= [] ->
+    backup(Db, list_to_binary(Path));
 
-export(Db, Relations, #{encoding := json})
-when is_reference(Db), is_binary(Relations) ->
-    export_relations_json_nif(Db, Relations);
+backup(Db, Path) when is_binary(Path) ->
+    backup_nif(Db, Path).
 
-export(Db, Relations, _) when is_reference(Db), is_binary(Relations) ->
-    export_relations_nif(Db, Relations).
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec restore(Db :: reference(), Path :: path()) ->
+    ok | {error, Reason :: any()}.
+
+restore(Db, Path) when is_list(Path), Path =/= [] ->
+    restore(Db, list_to_binary(Path));
+
+restore(Db, Path) when is_binary(Path) ->
+    restore_nif(Db, Path).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec import_from_backup(Db :: reference(), Path :: path(), Relations :: []) ->
+    ok | {error, Reason :: any()}.
+
+import_from_backup(Db, Path, Relations) when is_list(Path), Path =/= [] ->
+    import_from_backup(Db, list_to_binary(Path), Relations);
+
+import_from_backup(Db, Path, Relations)
+when is_binary(Path), is_binary(Relations) ->
+    import_from_backup_nif(Db, Path, Relations).
 
 
 
@@ -455,10 +500,10 @@ export(Db, Relations, _) when is_reference(Db), is_binary(Relations) ->
 %% @doc List all existing relations.
 %% @end
 %% -----------------------------------------------------------------------------
--spec relations(DbRef :: reference()) -> query_return().
+-spec relations(Db :: reference()) -> query_return().
 
-relations(DbRef) ->
-    run(DbRef, <<"::relations">>).
+relations(Db) ->
+    run(Db, <<"::relations">>).
 
 
 %% -----------------------------------------------------------------------------
@@ -466,29 +511,29 @@ relations(DbRef) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec create_relation(
-    DbRef :: reference(),
+    Db :: reference(),
     RelName :: atom() | binary() | list(),
     Spec :: relation_spec()) ->
     ok | {error, Reason :: any()} | no_return().
 
-create_relation(DbRef, RelName, Spec) when is_atom(RelName) ->
-    create_relation(DbRef, atom_to_binary(RelName), Spec);
+create_relation(Db, RelName, Spec) when is_atom(RelName) ->
+    create_relation(Db, atom_to_binary(RelName), Spec);
 
-create_relation(DbRef, RelName, Spec) when is_list(RelName) ->
-    create_relation(DbRef, list_to_binary(RelName), Spec);
+create_relation(Db, RelName, Spec) when is_list(RelName) ->
+    create_relation(Db, list_to_binary(RelName), Spec);
 
-create_relation(DbRef, RelName, Spec) when is_binary(RelName), is_map(Spec) ->
+create_relation(Db, RelName, Spec) when is_binary(RelName), is_map(Spec) ->
     Encoded =
         try
             cozodb_script_utils:encode_relation_spec(Spec)
         catch
             error:{EReason, Message} ->
-                ?ERROR(EReason, [DbRef, RelName, Spec], #{3 => Message})
+                ?ERROR(EReason, [Db, RelName, Spec], #{3 => Message})
         end,
 
     Query = [<<":create">>, $\s, RelName, $\s, Encoded],
 
-    case run(DbRef, iolist_to_binary(Query)) of
+    case run(Db, iolist_to_binary(Query)) of
         {ok, _} ->
             ok;
         {error, Reason} ->
@@ -500,14 +545,14 @@ create_relation(DbRef, RelName, Spec) when is_binary(RelName), is_map(Spec) ->
 %% @doc List columns for relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_relation(DbRef :: reference(), RelNames :: [binary() | list()]) ->
+-spec remove_relation(Db :: reference(), RelNames :: [binary() | list()]) ->
     query_return().
 
-remove_relation(DbRef, RelName) when is_list(RelName) ->
-    remove_relation(DbRef, list_to_binary(RelName));
+remove_relation(Db, RelName) when is_list(RelName) ->
+    remove_relation(Db, list_to_binary(RelName));
 
-remove_relation(DbRef, RelNames) ->
-    case run(DbRef, <<"::remove", $\s, RelNames/binary>>) of
+remove_relation(Db, RelNames) ->
+    case run(Db, <<"::remove", $\s, RelNames/binary>>) of
         {ok, _} ->
             ok;
         {error, Reason} ->
@@ -519,12 +564,12 @@ remove_relation(DbRef, RelNames) ->
 %% @doc List columns for relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_relations(DbRef :: reference(), RelNames :: [binary() | list()]) ->
+-spec remove_relations(Db :: reference(), RelNames :: [binary() | list()]) ->
     ok | {error, Reason :: any()}.
 
-remove_relations(DbRef, RelNames0) ->
+remove_relations(Db, RelNames0) ->
     RelNames = iolist_to_binary(lists:join(", ", RelNames0)),
-    case run(DbRef, <<"::remove", $\s, RelNames/binary>>) of
+    case run(Db, <<"::remove", $\s, RelNames/binary>>) of
         {ok, _} ->
             ok;
         {error, _} = Error ->
@@ -537,47 +582,47 @@ remove_relations(DbRef, RelNames0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec describe(
-    DbRef :: reference(),
+    Db :: reference(),
     RelName :: binary() | list(),
     Desc :: binary() | list()) -> query_return().
 
-describe(DbRef, RelName, Desc) when is_list(RelName) ->
-    describe(DbRef, list_to_binary(RelName), Desc);
+describe(Db, RelName, Desc) when is_list(RelName) ->
+    describe(Db, list_to_binary(RelName), Desc);
 
-describe(DbRef, RelName, Desc) when is_list(Desc) ->
-    describe(DbRef, RelName, list_to_binary(Desc));
+describe(Db, RelName, Desc) when is_list(Desc) ->
+    describe(Db, RelName, list_to_binary(Desc));
 
-describe(DbRef, RelName, Desc) ->
+describe(Db, RelName, Desc) ->
     Cmd = <<"::describe", $\s, RelName/binary, $\s, Desc/binary, "?">>,
-    run(DbRef, Cmd).
+    run(Db, Cmd).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc List columns for relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec columns(DbRef :: reference(), RelName :: binary() | list()) ->
+-spec columns(Db :: reference(), RelName :: binary() | list()) ->
     query_return().
 
-columns(DbRef, RelName) when is_list(RelName) ->
-    columns(DbRef, list_to_binary(RelName));
+columns(Db, RelName) when is_list(RelName) ->
+    columns(Db, list_to_binary(RelName));
 
-columns(DbRef, RelName) ->
-    run(DbRef, <<"::columns", $\s, RelName/binary>>).
+columns(Db, RelName) ->
+    run(Db, <<"::columns", $\s, RelName/binary>>).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc List indices for relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec indices(DbRef :: reference(), RelName :: binary() | list()) ->
+-spec indices(Db :: reference(), RelName :: binary() | list()) ->
     query_return().
 
-indices(DbRef, RelName) when is_list(RelName) ->
-    indices(DbRef, list_to_binary(RelName));
+indices(Db, RelName) when is_list(RelName) ->
+    indices(Db, list_to_binary(RelName));
 
-indices(DbRef, RelName) ->
-    run(DbRef, <<"::indices", $\s, RelName/binary>>).
+indices(Db, RelName) ->
+    run(Db, <<"::indices", $\s, RelName/binary>>).
 
 
 %% -----------------------------------------------------------------------------
@@ -609,24 +654,42 @@ indices(DbRef, RelName) ->
 %% controls whether the index should keep pruned connections.
 %% </li>
 %% </ul>
+%%
+%% ==== Example ==
+%% ```
+%% 1> Spec = #{
+%%     type => hnsw,
+%%     dim => 128,
+%%     m => 50,
+%%     ef_construction => 20,
+%%     dtype => f32,
+%%     distance => l2,
+%%     fields => [v],
+%%     filter => <<"k != 'foo'">>,
+%%     extend_candidates => false,
+%%     keep_pruned_connections => false
+%% }.
+%% 2> create_index(Db, my_relation, Spec).
+%% ok
+%% '''
 %% @end
 %% -----------------------------------------------------------------------------
 -spec create_index(
-    DbRef :: reference(),
+    Db :: reference(),
     RelName :: binary() | list(),
     Name :: binary() | list(),
     Spec :: index_spec()) -> query_return().
 
-create_index(DbRef, RelName, Name, #{type := Type} = Spec0) when is_map(Spec0) ->
+create_index(Db, RelName, Name, #{type := Type} = Spec0) when is_map(Spec0) ->
     Spec = cozodb_script_utils:encode_index_spec(Spec0),
     IndexOp = index_type_op(Type),
     Query = iolist_to_binary([
         $:, $:, IndexOp, $\s, "create", $\s, RelName, $:, Name, $\s, Spec
     ]),
-    run(DbRef, Query);
+    run(Db, Query);
 
-create_index(DbRef, RelName, Name, Spec) ->
-    ?ERROR(badarg, [DbRef, RelName, Name, Spec], #{
+create_index(Db, RelName, Name, Spec) ->
+    ?ERROR(badarg, [Db, RelName, Name, Spec], #{
         4 =>
             "invalid value for field 'type'. "
             "Valid values are 'covering', 'hnsw', 'lsh' and 'fts'"
@@ -637,15 +700,15 @@ create_index(DbRef, RelName, Name, Spec) ->
 %% @doc Drop index with fully qualified name.
 %% @end
 %% -----------------------------------------------------------------------------
--spec drop_index(DbRef :: reference(), FQN :: binary() | list()) ->
+-spec drop_index(Db :: reference(), FQN :: binary() | list()) ->
     query_return().
 
-drop_index(DbRef, FQN) when is_list(FQN) ->
-    drop_index(DbRef, list_to_binary(FQN));
+drop_index(Db, FQN) when is_list(FQN) ->
+    drop_index(Db, list_to_binary(FQN));
 
-drop_index(DbRef, FQN) when is_binary(FQN) ->
+drop_index(Db, FQN) when is_binary(FQN) ->
     Cmd = <<"::index drop", $\s, FQN/binary>>,
-    run(DbRef, Cmd).
+    run(Db, Cmd).
 
 
 %% -----------------------------------------------------------------------------
@@ -653,32 +716,32 @@ drop_index(DbRef, FQN) when is_binary(FQN) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec drop_index(
-    DbRef :: reference(),
+    Db :: reference(),
     RelName :: binary() | list(),
     Name :: binary() | list()) -> query_return().
 
-drop_index(DbRef, RelName, Name) when is_list(RelName) ->
-    drop_index(DbRef, list_to_binary(RelName), Name);
+drop_index(Db, RelName, Name) when is_list(RelName) ->
+    drop_index(Db, list_to_binary(RelName), Name);
 
-drop_index(DbRef, RelName, Name) when is_list(Name) ->
-    drop_index(DbRef, RelName, list_to_binary(Name));
+drop_index(Db, RelName, Name) when is_list(Name) ->
+    drop_index(Db, RelName, list_to_binary(Name));
 
-drop_index(DbRef, RelName, Name) when is_binary(RelName), is_binary(Name) ->
-    drop_index(DbRef, <<RelName/binary, ":", Name/binary>>).
+drop_index(Db, RelName, Name) when is_binary(RelName), is_binary(Name) ->
+    drop_index(Db, <<RelName/binary, ":", Name/binary>>).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec triggers(DbRef :: reference(), RelName :: binary() | list()) ->
+-spec triggers(Db :: reference(), RelName :: binary() | list()) ->
     query_return().
 
-triggers(DbRef, RelName) when is_list(RelName) ->
-    triggers(DbRef, list_to_binary(RelName));
+triggers(Db, RelName) when is_list(RelName) ->
+    triggers(Db, list_to_binary(RelName));
 
-triggers(DbRef, RelName) ->
-    run(DbRef, <<"::show_triggers", $\s, RelName/binary>>).
+triggers(Db, RelName) ->
+    run(Db, <<"::show_triggers", $\s, RelName/binary>>).
 
 
 %% -----------------------------------------------------------------------------
@@ -686,19 +749,19 @@ triggers(DbRef, RelName) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_triggers(
-    DbRef :: reference(),
+    Db :: reference(),
     RelName :: binary() | list(),
     Spec :: binary() | list()) -> query_return().
 
-set_triggers(DbRef, RelName, Spec) when is_list(RelName) ->
-    set_triggers(DbRef, list_to_binary(RelName), Spec);
+set_triggers(Db, RelName, Spec) when is_list(RelName) ->
+    set_triggers(Db, list_to_binary(RelName), Spec);
 
-set_triggers(DbRef, RelName, Spec) when is_list(Spec) ->
-    set_triggers(DbRef, RelName, list_to_binary(Spec));
+set_triggers(Db, RelName, Spec) when is_list(Spec) ->
+    set_triggers(Db, RelName, list_to_binary(Spec));
 
-set_triggers(DbRef, RelName, Spec) ->
+set_triggers(Db, RelName, Spec) ->
     Cmd = <<"::set_triggers", $\s, RelName/binary, $\s, Spec/binary>>,
-    run(DbRef, Cmd).
+    run(Db, Cmd).
 
 
 %% -----------------------------------------------------------------------------
@@ -706,46 +769,46 @@ set_triggers(DbRef, RelName, Spec) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete_triggers(
-    DbRef :: reference(),
+    Db :: reference(),
     RelName :: binary() | list(),
     Spec :: binary() | list()) -> query_return().
 
-delete_triggers(DbRef, RelName, Spec) when is_list(RelName) ->
-    delete_triggers(DbRef, list_to_binary(RelName), Spec);
+delete_triggers(Db, RelName, Spec) when is_list(RelName) ->
+    delete_triggers(Db, list_to_binary(RelName), Spec);
 
-delete_triggers(DbRef, RelName, Spec) when is_list(Spec) ->
-    delete_triggers(DbRef, RelName, list_to_binary(Spec));
+delete_triggers(Db, RelName, Spec) when is_list(Spec) ->
+    delete_triggers(Db, RelName, list_to_binary(Spec));
 
-delete_triggers(DbRef, RelName, Spec) ->
+delete_triggers(Db, RelName, Spec) ->
     Cmd = <<"::set_triggers", $\s, RelName/binary>>,
-    run(DbRef, Cmd).
+    run(Db, Cmd).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec register_callback(DbRef :: reference(), RelName :: binary()) ->
+-spec register_callback(Db :: reference(), RelName :: binary()) ->
     ok.
 
-register_callback(DbRef, RelName) when is_list(RelName) ->
-    register_callback(DbRef, list_to_binary(RelName));
+register_callback(Db, RelName) when is_list(RelName) ->
+    register_callback(Db, list_to_binary(RelName));
 
-register_callback(DbRef, RelName)
-when is_reference(DbRef), is_binary(RelName)->
-    register_callback_nif(DbRef, RelName).
+register_callback(Db, RelName)
+when is_reference(Db), is_binary(RelName)->
+    register_callback_nif(Db, RelName).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unregister_callback(DbRef :: reference(), Id :: integer()) ->
+-spec unregister_callback(Db :: reference(), Id :: integer()) ->
     boolean().
 
-unregister_callback(DbRef, Id)
-when is_reference(DbRef), is_integer(Id)->
-    unregister_callback_nif(DbRef, Id).
+unregister_callback(Db, Id)
+when is_reference(Db), is_integer(Id)->
+    unregister_callback_nif(Db, Id).
 
 
 %% =============================================================================
@@ -758,10 +821,10 @@ when is_reference(DbRef), is_integer(Id)->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec running(DbRef :: reference()) -> query_result().
+-spec running(Db :: reference()) -> query_result().
 
-running(DbRef) ->
-    run(DbRef, <<"::running">>).
+running(Db) ->
+    run(Db, <<"::running">>).
 
 
 %% -----------------------------------------------------------------------------
@@ -770,10 +833,10 @@ running(DbRef) ->
 %% identifiers.
 %% @end
 %% -----------------------------------------------------------------------------
--spec kill(DbRef :: reference(), Id :: binary()) -> query_result().
+-spec kill(Db :: reference(), Id :: binary()) -> query_result().
 
-kill(DbRef, Id) when is_binary(Id) ->
-    run(DbRef, <<"::kill", $\s, Id/binary>>).
+kill(Db, Id) when is_binary(Id) ->
+    run(Db, <<"::kill", $\s, Id/binary>>).
 
 
 
@@ -787,10 +850,10 @@ kill(DbRef, Id) when is_binary(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec compact(DbRef :: reference()) -> ok | {error, Reason :: any()}.
+-spec compact(Db :: reference()) -> ok | {error, Reason :: any()}.
 
-compact(DbRef) ->
-    case run(DbRef, <<"::compact">>) of
+compact(Db) ->
+    case run(Db, <<"::compact">>) of
         {ok, _} ->
             ok;
         {error, _} = Error ->
@@ -809,14 +872,14 @@ compact(DbRef) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec explain(DbRef :: reference(), Query :: binary() | list()) ->
+-spec explain(Db :: reference(), Query :: binary() | list()) ->
     query_return().
 
-explain(DbRef, Query) when is_list(Query) ->
-    explain(DbRef, list_to_binary(Query));
+explain(Db, Query) when is_list(Query) ->
+    explain(Db, list_to_binary(Query));
 
-explain(DbRef, Query) when is_binary(Query) ->
-    run(DbRef, <<"::explain", ${, $\s, Query/binary, $\s, $}>>).
+explain(Db, Query) when is_binary(Query) ->
+    run(Db, <<"::explain", ${, $\s, Query/binary, $\s, $}>>).
 
 
 
@@ -874,10 +937,10 @@ new_nif(_Engine, _Path, _Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec info_nif(DbRef :: reference()) ->
+-spec info_nif(Db :: reference()) ->
     #{engine := binary(), path := binary()}.
 
-info_nif(_DbRef) ->
+info_nif(_Db) ->
     ?NIF_NOT_LOADED.
 
 
@@ -886,10 +949,10 @@ info_nif(_DbRef) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_nif(DbRef :: reference()) ->
+-spec close_nif(Db :: reference()) ->
     {ok, info()} | {error, Reason :: any()}.
 
-close_nif(_DbRef) ->
+close_nif(_Db) ->
     ?NIF_NOT_LOADED.
 
 
@@ -899,13 +962,13 @@ close_nif(_DbRef) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec run_script_nif(
-    DbRef :: reference(),
+    Db :: reference(),
     Script :: binary(),
     Params :: binary(),
     ReadOnly :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_nif(_DbRef, _Script, _Params, _ReadOnly) ->
+run_script_nif(_Db, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
 
 
@@ -915,13 +978,13 @@ run_script_nif(_DbRef, _Script, _Params, _ReadOnly) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec run_script_json_nif(
-    DbRef :: reference(),
+    Db :: reference(),
     Script :: binary(),
     Params :: binary(),
     ReadOnly :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_json_nif(_DbRef, _Script, _Params, _ReadOnly) ->
+run_script_json_nif(_Db, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
 
 
@@ -931,13 +994,13 @@ run_script_json_nif(_DbRef, _Script, _Params, _ReadOnly) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec run_script_str_nif(
-    DbRef :: reference(),
+    Db :: reference(),
     Script :: binary(),
     Params :: binary(),
     ReadOnly :: boolean()) ->
     {ok, Json :: binary()}.
 
-run_script_str_nif(_DbRef, _Script, _Params, _ReadOnly) ->
+run_script_str_nif(_Db, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
 
 
@@ -946,10 +1009,10 @@ run_script_str_nif(_DbRef, _Script, _Params, _ReadOnly) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec import_relations_nif(DbRef :: reference(), Relations :: binary()) ->
+-spec import_relations_nif(Db :: reference(), Relations :: binary()) ->
     ok | {error, Reason :: any()}.
 
-import_relations_nif(_DbRef, _Relations) ->
+import_relations_nif(_Db, _Relations) ->
     ?NIF_NOT_LOADED.
 
 
@@ -958,10 +1021,10 @@ import_relations_nif(_DbRef, _Relations) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec export_relations_nif(DbRef :: reference(), Relations :: binary()) ->
+-spec export_relations_nif(Db :: reference(), Relations :: binary()) ->
     {ok, relations()} | {error, Reason :: any()}.
 
-export_relations_nif(_DbRef, _Relations) ->
+export_relations_nif(_Db, _Relations) ->
     ?NIF_NOT_LOADED.
 
 
@@ -970,10 +1033,10 @@ export_relations_nif(_DbRef, _Relations) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec export_relations_json_nif(DbRef :: reference(), Relations :: binary()) ->
+-spec export_relations_json_nif(Db :: reference(), EncRelNames :: binary()) ->
     {ok, relations()} | {error, Reason :: any()}.
 
-export_relations_json_nif(_DbRef, _Relations) ->
+export_relations_json_nif(_Db, _EncRelNames) ->
     ?NIF_NOT_LOADED.
 
 
@@ -982,10 +1045,10 @@ export_relations_json_nif(_DbRef, _Relations) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec register_callback_nif(DbRef :: reference(), RelName :: binary()) ->
-    ok.
+-spec backup_nif(Db :: reference(), Path :: path()) ->
+    ok | {error, Reason :: any()}.
 
-register_callback_nif(_DbRef, _RelName) ->
+backup_nif(_Db, _Path) ->
     ?NIF_NOT_LOADED.
 
 
@@ -994,10 +1057,48 @@ register_callback_nif(_DbRef, _RelName) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unregister_callback_nif(DbRef :: reference(), Id :: integer()) ->
+-spec restore_nif(Db :: reference(), Path :: path()) ->
+    ok | {error, Reason :: any()}.
+
+restore_nif(_Db, _Path) ->
+    ?NIF_NOT_LOADED.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec import_from_backup_nif(
+    Db :: reference(), Path :: binary(), Relations :: binary()) ->
+    ok | {error, Reason :: any()}.
+
+import_from_backup_nif(_Db, _Path, _Relations) ->
+    ?NIF_NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec register_callback_nif(Db :: reference(), RelName :: binary()) ->
     ok.
 
-unregister_callback_nif(_DbRef, _Id) ->
+register_callback_nif(_Db, _RelName) ->
+    ?NIF_NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister_callback_nif(Db :: reference(), Id :: integer()) ->
+    ok.
+
+unregister_callback_nif(_Db, _Id) ->
     ?NIF_NOT_LOADED.
 
 
@@ -1093,7 +1194,7 @@ engine_opts(Other) ->
 index_type_op(covering) -> <<"index">>;
 index_type_op(fts) -> <<"fts">>;
 index_type_op(hnsw) -> <<"hnsw">>;
-index_type_op(lhs) -> <<"lhs">>;
+index_type_op(lsh) -> <<"lsh">>;
 index_type_op(_) -> error(badarg).
 
 

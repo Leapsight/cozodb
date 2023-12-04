@@ -47,7 +47,7 @@ use crossbeam::channel::*;
 // Cozo
 use cozo::*;
 use ndarray::Array1; // used by Array32Wrapper
-
+use serde_json::json;
 
 
 // =============================================================================
@@ -64,7 +64,7 @@ mod atoms {
         true_ = "true",
         false_ = "false",
         error,
-        nil,
+        null,
         json,
         cozo_named_rows,
         engine,
@@ -96,6 +96,8 @@ rustler::init!("cozodb",
       import_relations,
       export_relations,
       export_relations_json,
+      backup,
+      restore,
       register_callback,
       unregister_callback
     ],
@@ -228,7 +230,7 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
                 let more = &**more_ref;
                 NamedRowsWrapper(more).encode(env)
             },
-            None => atoms::undefined().encode(env)
+            None => atoms::null().encode(env)
         };
 
         // Create and return the Erlang term {ok, map()}
@@ -244,11 +246,11 @@ struct BTreeMapWrapper(BTreeMap<String, NamedRows>);
 
 impl<'a> Encoder for BTreeMapWrapper {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
-        let map = rustler::types::map::map_new(env);
+        let mut map = rustler::types::map::map_new(env);
         for (key, value) in &self.0 {
             let key_term = key.encode(env);
-            let value_term = NamedRowsWrapper(&value).encode(env);
-            map.map_put(key_term, value_term).unwrap();
+            let value_term = NamedRowsWrapper(value).encode(env);
+            map = map.map_put(key_term, value_term).unwrap();
         }
         map
     }
@@ -261,7 +263,7 @@ struct DataValueWrapper(DataValue);
 impl<'a> Encoder for DataValueWrapper {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
         match &self.0 {
-            DataValue::Null => atoms::nil().encode(env),
+            DataValue::Null => atoms::null().encode(env),
             DataValue::Bool(i) => i.encode(env),
             DataValue::Num(i) => NumWrapper(i.clone()).encode(env),
             DataValue::Str(i) => i.encode(env),
@@ -294,8 +296,8 @@ impl<'a> Encoder for DataValueWrapper {
                 // This types are only used internally so we shoul never receive
                 // one of this as a result of running a script, but we match
                 // them to avoid a compiler error.
-                // Just in case we do get them, we return the atom 'nil'
-                atoms::nil().encode(env)
+                // Just in case we do get them, we return the atom 'null'
+                atoms::null().encode(env)
         }
     }
 }
@@ -602,7 +604,7 @@ fn import_relations<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_nif")]
 
 fn export_relations<'a>(
-    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<Term<'a>>
+    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<String>
     ) -> NifResult<Term<'a>> {
 
     let db =
@@ -617,37 +619,27 @@ fn export_relations<'a>(
             }
         };
 
-    let mut strings = Vec::new();
-    for term in relations {
-        let string: Result<String, _> = term.decode();
-        match string {
-            Ok(s) =>
-                strings.push(s),
-            Err(_) =>
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid relations".to_string())
-                    )
-                )
-        }
-    };
-
-    // let results = db.export_relations(strings.iter().map(|s| s as &str));
-    match db.export_relations(strings.iter()) {
+    match db.export_relations(relations.iter().map(|s| s as &str)) {
         Ok(btreemap) =>{
-            let data = BTreeMapWrapper(btreemap).encode(env);
+            let mut data = rustler::types::map::map_new(env);
+            for (key, value) in btreemap {
+                let key_term = key.encode(env);
+                let value_term = NamedRowsWrapper(&value).encode(env);
+                data = data.map_put(key_term, value_term).unwrap();
+            }
             Ok((atoms::ok().encode(env), data.encode(env)).encode(env))
         },
         Err(err) =>
             Err(rustler::Error::Term(Box::new(err.to_string())))
     }
+
 }
 
 /// Export relations as JSON
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_json_nif")]
 
 fn export_relations_json<'a>(
-    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<Term<'a>>
+    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<String>
     ) -> NifResult<Term<'a>> {
 
     let db =
@@ -662,27 +654,102 @@ fn export_relations_json<'a>(
             }
         };
 
-    let mut strings = Vec::new();
-    for term in relations {
-        let string: Result<String, _> = term.decode();
-        match string {
-            Ok(s) =>
-                strings.push(s),
-            Err(_) =>
+    match db.export_relations(relations.iter().map(|s| s as &str)) {
+        Ok(btreemap) =>{
+            let data: Vec<_> = btreemap
+                .into_iter()
+                .map(|(k, v)| (k, v.into_json()))
+                .collect();
+            let json = json!(data).to_string();
+            Ok((atoms::ok().encode(env), json.encode(env)).encode(env))
+        },
+        Err(err) =>
+            Err(rustler::Error::Term(Box::new(err.to_string())))
+    }
+}
+
+
+
+/// Backs up the database at path
+#[rustler::nif(schedule = "DirtyIo", name="backup_nif")]
+
+fn backup<'a>(env: Env<'a>, resource: ResourceArc<DbResource>, path: String
+    ) -> NifResult<Term<'a>> {
+
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
                 return Err(
                     rustler::Error::Term(
-                        Box::new("invalid relations".to_string())
+                        Box::new("invalid reference".to_string())
                     )
                 )
-        }
-    };
+            }
+        };
 
-    // let results = db.export_relations(strings.iter().map(|s| s as &str));
-    match db.export_relations(strings.iter()) {
-        Ok(btreemap) =>{
-            let data = BTreeMapWrapper(btreemap).encode(env);
-            Ok((atoms::ok().encode(env), data.encode(env)).encode(env))
-        },
+    match db.backup_db(path) {
+        Ok(()) => {
+            Ok(atoms::ok().encode(env))
+        }
+        Err(err) =>
+            Err(rustler::Error::Term(Box::new(err.to_string())))
+    }
+}
+
+/// Backs up the database at path
+#[rustler::nif(schedule = "DirtyIo", name="restore_nif")]
+
+fn restore<'a>(env: Env<'a>, resource: ResourceArc<DbResource>, path: String
+    ) -> NifResult<Term<'a>> {
+
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    match db.restore_backup(path) {
+        Ok(()) => {
+            Ok(atoms::ok().encode(env))
+        }
+        Err(err) =>
+            Err(rustler::Error::Term(Box::new(err.to_string())))
+    }
+}
+
+/// Backs up the database at path
+#[rustler::nif(schedule = "DirtyIo", name="import_from_backup_nif")]
+
+fn import_from_backup<'a>(
+    env: Env<'a>,
+    resource: ResourceArc<DbResource>,
+    path: String,
+    relations: Vec<String>
+    ) -> NifResult<Term<'a>> {
+
+    let db =
+        match get_db(resource.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    match db.import_from_backup(path, &relations) {
+        Ok(()) => {
+            Ok(atoms::ok().encode(env))
+        }
         Err(err) =>
             Err(rustler::Error::Term(Box::new(err.to_string())))
     }

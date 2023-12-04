@@ -790,9 +790,12 @@ maintenance_commands_fun({Module, Engine}) ->
     }),
     % import/export relations
     % wrong json lead to an error
-    {error, _} = Module:import(Db, #{ {} => {} }),
+    ?assertError(
+        {badarg,"invalid JSON key '{}'"},
+        Module:import(Db, #{ {} => {} })
+    ),
     Relations = #{ stored => #{ headers => [c1,c2], rows => [] }},
-    {ok, _} = Module:import(Db, Relations),
+    ok = Module:import(Db, Relations),
 
     % wrong json lead to an error
     {error, _} = Module:export(Db, #{ {} => {} }),
@@ -921,6 +924,7 @@ hnsw(Config) ->
 
 hnsw_fun({Module, Engine}) ->
     {ok, Db} = Module:open(Engine),
+    _ = cozodb:remove_relation(Db, "table_hnsw_fun"),
     ok = cozodb:create_relation(Db, "table_hnsw_fun", #{
         keys => [{k, string}],
         columns => [{v, {vector, 32, 128}}]
@@ -937,8 +941,7 @@ hnsw_fun({Module, Engine}) ->
         extend_candidates => false,
         keep_pruned_connections => false
     }),
-    % @todo: fix crash
-    % {ok, _} = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
+    {ok, _} = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------
@@ -954,20 +957,23 @@ lsh(Config) ->
 
 lsh_fun({Module, Engine}) ->
     {ok, Db} = Module:open(Engine),
-    {ok, _} = Module:run(Db, ":create table {k: String => v: String?}"),
-    {ok, _} = Module:create_lsh(Db, "table:index_name", "{ "
-                                "extractor: v, "
-                                "extract_filter: !is_null(v), "
-                                "tokenizer: Simple, "
-                                "filters: [AlphaNumOnly], "
-                                "n_perm: 200, "
-                                "target_threshold: 0.7, "
-                                "n_gram: 3, "
-                                "false_positive_weight: 1.0, "
-                                "false_negative_weight: 1.0, "
-                                "}"),
-    % @todo: fix crash
-    % {ok, _} = cozodb:delete_lsh(Db, "table:index_table"),
+    ok = cozodb:create_relation(Db, "table_lsh_fun", #{
+        keys => [{k, string}],
+        columns => [{v, #{type => string, nullable => true}}]
+    }),
+    {ok, _} = Module:create_index(Db, "table_lsh_fun", "my_lsh_index", #{
+        type => lsh,
+        extractor => v,
+        extract_filter => "!is_null(v)",
+        tokenizer => simple,
+        filters => [alphanumonly],
+        n_perm => 200,
+        target_threshold => 0.7,
+        n_gram => 3,
+        false_positive_weight => 1.0,
+        false_negative_weight => 1.0
+    }),
+    {ok, _} = cozodb:drop_index(Db, "table_lsh_fun", "my_lsh_index"),
     Module:close(Db).
 
 %%--------------------------------------------------------------------

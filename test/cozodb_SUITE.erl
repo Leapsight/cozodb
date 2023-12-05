@@ -293,12 +293,13 @@ tutorial_rules_fun({Module, Engine, Path}) ->
 tutorial_joins() -> [].
 
 tutorial_joins(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E, Path} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_joins_fun/1, Mapping).
 
-tutorial_joins_fun({Module, Engine}) ->
+tutorial_joins_fun({Module, Engine, Path}) ->
     ?QUERY_OK("r1[] <- [[1, 'a'], [2, 'b']]"
               "r2[] <- [[2, 'B'], [3, 'C']]"
               "?[l1, l2] := r1[a, l1], r2[b, l2]"),
@@ -319,13 +320,14 @@ tutorial_joins_fun({Module, Engine}) ->
 tutorial_stored_relations() -> [].
 
 tutorial_stored_relations(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E, Path} || M <- Modules, E <- Engines ],
     lists:map(fun tutorial_stored_relations_fun/1, Mapping).
 
-tutorial_stored_relations_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
+tutorial_stored_relations_fun({Module, Engine, Path}) ->
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
     ?IQUERY_LOG(Db, ":create stored {c1, c2}"),
     ?IQUERY_LOG(Db, ":create dept_info {"
                 "company_name: String,"
@@ -356,7 +358,7 @@ tutorial_stored_relations_fun({Module, Engine}) ->
     ?IQUERY_LOG(Db, "::remove stored"),
     ?IQUERY_LOG(Db, "::relations"),
     ?IQUERY_LOG(Db, "::remove fd"),
-    ok = Module:close(Db).
+    ?COZO_CLOSE(Module, Db).
 
 %%--------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Command-blocks
@@ -506,7 +508,7 @@ air_routes_fun({DataDir, Module, Engine}) ->
 
     ?IQUERY_LOG(Db, "{:create route { fr: String, to: String => dist: Float }}"),
 
-    Module:import_backup(Db, AirRoutes),
+    Module:import_from_backup(Db, AirRoutes),
 
     ?IQUERY_LOG(Db, "::relations"),
 
@@ -761,14 +763,16 @@ rocksdb_fun({Module, _Engine}) ->
 maintenance_commands() -> [].
 
 maintenance_commands(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E, Path} || M <- Modules, E <- Engines ],
     lists:map(fun maintenance_commands_fun/1, Mapping).
 
-maintenance_commands_fun({Module, Engine}) ->
+
+maintenance_commands_fun({Module, Engine, Path}) ->
     EngineName = atom_to_list(Engine),
-    {ok, Db} = Module:open(Engine),
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
     #{path := DbPath} = Module:info(Db),
 
     {ok, _} = Module:run(Db, "?[] <- [[1,2,3]]"),
@@ -796,21 +800,18 @@ maintenance_commands_fun({Module, Engine}) ->
     ),
     Relations = #{ stored => #{ headers => [c1,c2], rows => [] }},
     ok = Module:import(Db, Relations),
-
-    % wrong json lead to an error
-    {error, _} = Module:export(Db, #{ {} => {} }),
-    {ok, _} = Module:export(Db, #{ relations => [stored] }),
+    {ok, _} = Module:export(Db, [<<"stored">>]),
 
     % backup/restore database
-    BackupPath = DbPath ++ "_" ++ EngineName ++ ".backup",
-    {ok, _} = Module:backup(Db, BackupPath),
-    {ok, _} = Module:restore(Db, BackupPath),
+    BackupPath = binary_to_list(DbPath) ++ "_" ++ EngineName ++ ".backup",
+    ok = Module:backup(Db, BackupPath),
+    ok = Module:restore(Db, BackupPath),
     ct:pal(info, ?LOW_IMPORTANCE, "~p", [{BackupPath}]),
 
     % restore from json
     % {ok, Backup} = file:read_file(BackupPath),
     % BackupJson = binary_to_list(Backup),
-    % {ok, _} = Module:import_backup(Db, BackupJson),
+    % {ok, _} = Module:import_from_backup(Db, BackupJson),
 
     % delete relation one by one
     ok = Module:remove_relation(Db, "stored"),
@@ -819,7 +820,8 @@ maintenance_commands_fun({Module, Engine}) ->
     % delete many relations
     ok = Module:remove_relations(Db, ["stored3", "stored4", "stored5"]),
 
-    ok = Module:close(Db).
+    ok = ?COZO_CLOSE(Module, Db).
+
 
 %%--------------------------------------------------------------------
 %%

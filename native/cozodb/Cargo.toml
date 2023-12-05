@@ -1,10 +1,3 @@
-[profile.release]
-lto = true
-
-# [target.'cfg(target_arch = "x86_64")'.rustflags]
-# flags = ["-C", "target-feature=+avx2"]
-
-
 [package]
 name = "erlang-cozodb"
 version = "0.1.0"
@@ -34,7 +27,6 @@ num_cpus = "1.0"
 
 [features]
 default = [
-    # "cozo/jemalloc", # jemalloc as the global allocator for perf
     "cozo/storage-sqlite",
     "cozo/storage-rocksdb",
     "cozo/io-uring", # Enables io-uring option for the RocksDB storage

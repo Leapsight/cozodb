@@ -860,7 +860,7 @@ set_triggers(Db, RelName, Spec) when is_binary(RelName), is_list(Spec) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Calls {@link set_triggers/3} with and empty specs list.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete_triggers(Db :: reference(), RelName :: binary() | list()) ->

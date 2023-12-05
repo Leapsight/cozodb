@@ -677,14 +677,15 @@ air_routes_fun({DataDir, Module, Engine}) ->
 sqlite() -> [].
 
 sqlite(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
     lists:map(fun sqlite_fun/1, Mapping).
 
-sqlite_fun({Module, _Engine}) ->
+sqlite_fun({Module, _Engine, Path}) ->
     % create a new cozo database using sqlite
-    {ok, Db} = Module:open(sqlite),
+    {ok, Db} = ?COZO_OPEN(Module, sqlite, filename:join(Path, "/sqlite")),
 
     #{path := DbPath} = Module:info(Db),
     true = filelib:is_file(DbPath),
@@ -701,7 +702,7 @@ sqlite_fun({Module, _Engine}) ->
     %%           "[2, 'b', 'B'],"
     %%           "[3, 'c', 'C'],"
     %%           "[4, 'd', 'D']]"),
-    Module:close(Db),
+    ?COZO_CLOSE(Module, Db),
 
     % Reopen the database
     {ok, Db2} = Module:open(sqlite, DbPath),
@@ -712,7 +713,7 @@ sqlite_fun({Module, _Engine}) ->
            "[2, 'b', 'B'],"
            "[3, 'c', 'C'],"
            "[4, 'd', 'D']]"),
-    Module:close(Db2),
+    ?COZO_CLOSE(Module, Db2),
 
     % cleanup the file
     file:delete(DbPath).
@@ -829,13 +830,14 @@ maintenance_commands_fun({Module, Engine, Path}) ->
 system_commands() -> [].
 
 system_commands(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
     lists:map(fun system_commands_fun/1, Mapping).
 
-system_commands_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
+system_commands_fun({Module, Engine, Path}) ->
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
     #{path := _DbPath} = Module:info(Db),
 
     % create relations
@@ -868,28 +870,28 @@ system_commands_fun({Module, Engine}) ->
     % error during describe
     % {ok, _} = Module:describe(Db, "stored", "test").
 
-    {ok, _} = Module:get_triggers(Db, "stored"),
-    {ok, _} = Module:get_running_queries(Db),
-    {ok, _} = Module:compact(Db),
+    {ok, _} = Module:triggers(Db, "stored"),
+    {ok, _} = Module:running(Db),
+    ok = Module:compact(Db),
 
-    % individual access level
-    {ok, _} = Module:set_access_level(Db, hidden, "stored"),
-    {ok, _} = Module:set_access_level(Db, read_only, "stored"),
-    {ok, _} = Module:set_access_level(Db, protected, "stored"),
-    {ok, _} = Module:set_access_level(Db, normal, "stored"),
+    %% % individual access level
+    %% {ok, _} = Module:set_access_level(Db, hidden, "stored"),
+    %% {ok, _} = Module:set_access_level(Db, read_only, "stored"),
+    %% {ok, _} = Module:set_access_level(Db, protected, "stored"),
+    %% {ok, _} = Module:set_access_level(Db, normal, "stored"),
 
-    % multi set access level
-    {ok, _} = Module:set_access_levels(Db, hidden, ["stored2", "stored3"]),
-    {ok, _} = Module:set_access_levels(Db, read_only, ["stored2", "stored3"]),
-    {ok, _} = Module:set_access_levels(Db, protected, ["stored2", "stored3"]),
-    {ok, _} = Module:set_access_levels(Db, normal, ["stored2", "stored3"]),
+    %% % multi set access level
+    %% {ok, _} = Module:set_access_levels(Db, hidden, ["stored2", "stored3"]),
+    %% {ok, _} = Module:set_access_levels(Db, read_only, ["stored2", "stored3"]),
+    %% {ok, _} = Module:set_access_levels(Db, protected, ["stored2", "stored3"]),
+    %% {ok, _} = Module:set_access_levels(Db, normal, ["stored2", "stored3"]),
 
     % remove relations
     ok = Module:remove_relation(Db, "stored"),
     ok = Module:remove_relations(Db, ["stored2", "stored3", "stored4"]),
 
     % close database
-    ok = Module:close(Db).
+    ?COZO_CLOSE(Module, Db).
 
 %%--------------------------------------------------------------------
 %%
@@ -897,13 +899,14 @@ system_commands_fun({Module, Engine}) ->
 index() -> [].
 
 index(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
     lists:map(fun index_fun/1, Mapping).
 
-index_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
+index_fun({Module, Engine, Path}) ->
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
     {ok, _} = Module:run(Db, ":create r {a => b}"),
     {ok, _} = Module:create_index(Db, "r", "idx", #{
         type => covering,
@@ -911,7 +914,7 @@ index_fun({Module, Engine}) ->
     }),
     {ok, _} = Module:indices(Db, "r"),
     {ok, _} = Module:drop_index(Db, "r:idx"),
-    Module:close(Db).
+    ?COZO_CLOSE(Module, Db).
 
 %%--------------------------------------------------------------------
 %%

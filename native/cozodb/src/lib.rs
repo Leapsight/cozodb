@@ -121,6 +121,8 @@ fn on_load(env: Env, _: Term) -> bool {
 /// Struct used to globally manage database handles
 /// This is combined with lazy_static! macro to create a static variable
 /// containing this struct.
+/// We do this so that DbResource contains the Id as opposed to the DBinstance
+/// handle, required so that we can close a database.
 struct Handles {
     current: AtomicI32, // thread safe counter
     dbs: Mutex<BTreeMap<i32, DbInstance>>, // mapping of Id -> DbInstance handle
@@ -144,7 +146,7 @@ type Registrations = Arc<Mutex<HashMap<u32, Registration>>>;
 // variables with non-constant initializers directly.
 lazy_static! {
 
-    // Required so that we can close a database from Erlang
+    // Required so that we can close a database
     static ref HANDLES: Handles =
         Handles {
             // sets current to 0
@@ -205,7 +207,7 @@ lazy_static! {
 
 /// A NIF Resource representing the identifier for a DbInstance handle.
 /// We use HANDLES to associate identifiers with Cozo's DbInstance Handles
-/// so that we can use close().
+/// so that we can implement close().
 struct DbResource {
     db_id: i32,
     engine: String,
@@ -234,7 +236,7 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
             None => atoms::null().encode(env)
         };
 
-        // Create and return the Erlang term {ok, map()}
+        // Create and return an Erlang map with atom keys headers, rows and next
         let mut map = rustler::types::map::map_new(env);
         map = map.map_put(atoms::headers(), headers).unwrap();
         map = map.map_put(atoms::rows(), rows).unwrap();
@@ -242,7 +244,9 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
     }
 }
 
-/// Wrapper required by Cozo's export_relations()
+/// Wrapper required to serialise Cozo's BTreeMap<String, NamedRows>) value as
+/// Erlang Term.
+/// Used by export_relations()
 struct BTreeMapWrapper(BTreeMap<String, NamedRows>);
 
 impl<'a> Encoder for BTreeMapWrapper {
@@ -357,7 +361,7 @@ impl<'a> Encoder for Array64Wrapper {
 
 
 
-/// Returns a new cozo engine
+/// Opens/creates a database returning an Erlang NIF Resource (reference).
 #[rustler::nif(schedule = "DirtyIo", name="new_nif")]
 
 fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->

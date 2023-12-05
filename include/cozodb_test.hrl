@@ -31,25 +31,24 @@
 %%% @author Mathieu Kerjouan
 %%%===================================================================
 % helper to create ok queries
--define(PATH(Dir, Case), filename:join([Dir, atom_to_list(Case)])).
 -define(QUERY_OK(VAR_QUERY),
         begin
             (fun() ->
-                     {ok, Db} = Module:open(Engine),
-                     {ok, Result} = Module:run(Db, VAR_QUERY),
+                     {ok, Db} = cozodb:open(Engine),
+                     {ok, Result} = cozodb:run(Db, VAR_QUERY),
                      LogFormat = "db: ~p~n"
                          "query: ~s~n"
                          "result: ~p~n",
                      LogArgs = [Db, Engine, Result],
                      ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs),
-                     ok = Module:close(Db)
+                     ok = cozodb:close(Db)
              end)()
         end).
 
 -define(QUERY_OK(DB, VAR_QUERY),
         begin
             (fun() ->
-                     {ok, Result} = Module:run(DB, VAR_QUERY),
+                     {ok, Result} = cozodb:run(DB, VAR_QUERY),
                      LogFormat = "db: ~p~n"
                          "query: ~s~n"
                          "result: ~p~n",
@@ -59,18 +58,6 @@
              end)()
         end).
 
--define(COZO_OPEN(Module, Engine, Path),
-    Module:open(Engine, Path)
-).
-
--define(COZO_CLOSE(Module, DB),
-    ok = erlang:apply(Module, close, [DB]),
-    LogFormat = "db: ~p~n"
-    "mfa: {~p,~p,~p}~n"
-    "result: (ok)~n",
-    LogArgs = [DB, Module, close, [DB]],
-    ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs)
-       ).
 
 -define(COZO_OK(DB,FUNCTION,ARGS),
     begin
@@ -100,21 +87,21 @@
 -define(QUERY_ERROR(N,G,Q),
         begin
             (fun() ->
-                     {ok, N} = Module:open(G),
-                     {error, E} = Module:run(N, Q),
+                     {ok, N} = cozodb:open(G),
+                     {error, E} = cozodb:run(N, Q),
                      LogFormat = "db: ~p~n"
                          "query: ~s~n"
                          "result: ~p~n",
                      LogArgs = [N, Q, E],
                      ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs),
-                     ok = Module:close(N)
+                     ok = cozodb:close(N)
              end)()
         end).
 
 -define(IQUERY_LOG(DB, QUERY),
         begin
             (fun() ->
-                     {ok, _} = Module:run(DB, QUERY),
+                     {ok, _} = cozodb:run(DB, QUERY),
                      LogFormat = "db: ~p~n"
              "query: ~s~n",
              % "result: ~p",

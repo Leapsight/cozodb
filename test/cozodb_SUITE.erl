@@ -1,123 +1,173 @@
-%%%===================================================================
-%%% Copyright (c) 2023 Mathieu Kerjouan
-%%%
-%%% Redistribution and use in source and binary forms, with or without
-%%% modification, are permitted provided that the following conditions
-%%% are met:
-%%%
-%%% 1. Redistributions of source code must retain the above copyright
-%%% notice, this list of conditions and the following disclaimer.
-%%%
-%%% 2. Redistributions in binary form must reproduce the above
-%%% copyright notice, this list of conditions and the following
-%%% disclaimer in the documentation and/or other materials provided
-%%% with the distribution.
-%%%
-%%% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-%%% CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,
-%%% INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-%%% MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-%%% DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
-%%% BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-%%% EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
-%%% TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-%%% DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-%%% ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
-%%% TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
-%%% THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-%%% SUCH DAMAGE.
-%%%
-%%% @copyright 2023 Mathieu Kerjouan
-%%% @author Mathieu Kerjouan
-%%%
-%%% @copyright 2023 Leapsight
-%%%===================================================================
+%% =============================================================================
+%%  cozodb_SUITE.erl -
+%%
+%%  Copyright (c) 2023 Leapsight Holdings Limited. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%%
+%% Based on original work by Mathieu Kerjouan
+%%
+%%
+%%  Based on original work by Mathieu Kerjouan with the following notice:
+%%
+%%  -------------------------------------------------------------------
+%%  Copyright (c) 2023 Mathieu Kerjouan
+%%
+%%  Redistribution and use in source and binary forms, with or without
+%%  modification, are permitted provided that the following conditions
+%%  are met:
+%%
+%%  1. Redistributions of source code must retain the above copyright
+%%  notice, this list of conditions and the following disclaimer.
+%%
+%%  2. Redistributions in binary form must reproduce the above
+%%  copyright notice, this list of conditions and the following
+%%  disclaimer in the documentation and/or other materials provided
+%%  with the distribution.
+%%
+%%  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+%%  CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,
+%%  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+%%  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+%%  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+%%  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+%%  EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+%%  TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+%%  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+%%  ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
+%%  TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+%%  THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+%%  SUCH DAMAGE.
+%%
+%%  @copyright 2023 Mathieu Kerjouan
+%%  @author Mathieu Kerjouan
+%%
+%% =============================================================================
 -module(cozodb_SUITE).
--compile(export_all).
+
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 -include("cozodb_test.hrl").
 
 -define(DB_DIR_TEST, "./cozodb_test_SUITE_data").
 %% -define(ENGINES, [mem, sqlite, rocksdb]).
--define(ENGINES, [mem, rocksdb]).
-%%--------------------------------------------------------------------
+%% -define(ENGINES, [mem, rocksdb]).
+-define(ENGINES, [sqlite]).
+
+
+-compile(export_all).
+
+
+%% -----------------------------------------------------------------------------
 %% Function: suite() -> Info
 %% Info = [tuple()]
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 suite() -> [{timetrap,{seconds,30}}].
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: init_per_suite(Config0) ->
 %%               Config1 | {skip,Reason} | {skip_and_save,Reason,Config1}
 %% Config0 = Config1 = [tuple()]
 %% Reason = term()
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 init_per_suite(Config) ->
-    ok = application:set_env(cozodb, priv_dir, ?DB_DIR_TEST),
+    TMPDir = os:getenv("COZODB_TMP_DIR", "/tmp/cozodb"),
+    %% ok = application:set_env(cozodb, priv_dir, ?DB_DIR_TEST),
     case proplists:get_value(create_path, Config, true) of
-        true -> 
-            ok = file:make_dir(?DB_DIR_TEST);
+        true ->
+            _ = catch file:del_dir_r(TMPDir),
+            _ = catch file:make_dir(TMPDir);
         _ ->
             ok
     end,
-    Config.
+    [{tmp_dir, TMPDir}|Config].
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: end_per_suite(Config0) -> term() | {save_config,Config1}
 %% Config0 = Config1 = [tuple()]
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 end_per_suite(Config) ->
+    TMPDir = os:getenv("COZODB_TMP_DIR", "/tmp/cozodb"),
     case proplists:get_value(clean_path, Config, true) of
-        false -> ok;
-        _ -> ok = file:del_dir_r(?DB_DIR_TEST)
+        false ->
+            ok;
+        _ ->
+            ok = file:del_dir_r(TMPDir)
     end,
     ok = application:unset_env(cozodb, data_dir),
     ok.
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: init_per_group(GroupName, Config0) ->
 %%               Config1 | {skip,Reason} | {skip_and_save,Reason,Config1}
 %% GroupName = atom()
 %% Config0 = Config1 = [tuple()]
 %% Reason = term()
-%%--------------------------------------------------------------------
-init_per_group(_GroupName, Config) ->
-    Config.
+%% -----------------------------------------------------------------------------
+init_per_group(sqlite, Config) ->
+    [{db_engine, sqlite} | Config];
 
-%%--------------------------------------------------------------------
+init_per_group(mem, Config) ->
+    [{db_engine, mem} | Config];
+
+init_per_group(rocksdb, Config) ->
+    [{db_engine, rocksdb} | Config].
+
+
+
+%% -----------------------------------------------------------------------------
 %% Function: end_per_group(GroupName, Config0) ->
 %%               term() | {save_config,Config1}
 %% GroupName = atom()
 %% Config0 = Config1 = [tuple()]
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 end_per_group(_GroupName, _Config) ->
     ok.
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: init_per_testcase(TestCase, Config0) ->
 %%               Config1 | {skip,Reason} | {skip_and_save,Reason,Config1}
 %% TestCase = atom()
 %% Config0 = Config1 = [tuple()]
 %% Reason = term()
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    Path = filename:join([?DB_DIR_TEST, TestCase]),
-    file:make_dir(Path),
+    TMPDir = ?config(tmp_dir, Config),
+    Path0 = filename:join([TMPDir, TestCase]),
+    ok = file:make_dir(Path0),
+
+    Path = case ?config(db_engine, Config) of
+        sqlite ->
+            Filename = integer_to_list(erlang:system_time()) ++ ".sqlite",
+            filename:join([Path0, Filename]);
+        _ ->
+            Path0
+
+    end,
     [{db_path, Path} | Config].
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: end_per_testcase(TestCase, Config0) ->
 %%               term() | {save_config,Config1} | {fail,Reason}
 %% TestCase = atom()
 %% Config0 = Config1 = [tuple()]
 %% Reason = term()
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 end_per_testcase(_TestCase, Config) ->
-    ok = file:del_dir_r(?config(db_path, Config)),
+    _ = catch file:del_dir_r(?config(db_path, Config)),
     ok.
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: groups() -> [Group]
 %% Group = {GroupName,Properties,GroupsAndTestCases}
 %% GroupName = atom()
@@ -128,43 +178,57 @@ end_per_testcase(_TestCase, Config) ->
 %% RepeatType = repeat | repeat_until_all_ok | repeat_until_all_fail |
 %%              repeat_until_any_ok | repeat_until_any_fail
 %% N = integer() | forever
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 groups() ->
-    [].
+    [
+        {mem, all_cases()},
+        {rocksdb, all_cases()},
+        {sqlite, all_cases()}
+    ].
 
-%%--------------------------------------------------------------------
+
+all_cases() ->
+    [
+        simple
+        , tutorial_intro
+        , tutorial_expressions
+        , tutorial_rules
+        , tutorial_stored_relations
+        , tutorial_command_blocks
+        , tutorial_graphs
+        , multi_spawn
+        , maintenance_commands
+        , system_commands
+        , index
+        , hnsw
+        , lsh
+        , fts
+        %% , air_routes
+    ].
+
+
+%% -----------------------------------------------------------------------------
 %% Function: all() -> GroupsAndTestCases | {skip,Reason}
 %% GroupsAndTestCases = [{group,GroupName} | TestCase]
 %% GroupName = atom()
 %% TestCase = atom()
 %% Reason = term()
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 
-all() -> [
-    simple
-    , tutorial_intro
-    , tutorial_expressions
-    , tutorial_rules
-    , tutorial_stored_relations
-    , tutorial_command_blocks
-    , tutorial_graphs
-    , air_routes
-    , multi_spawn
-    , maintenance_commands
-    , system_commands
-    , index
-    , hnsw
-    , lsh
-    , fts
-    , sqlite
-    , rocksdb
+all() ->
+    [
+        {group, mem, []},
+        {group, rocksdb, []},
+        {group, sqlite, []},
+        sqlite,
+        rocksdb
     ].
 
-%%--------------------------------------------------------------------
+
+%% -----------------------------------------------------------------------------
 %% Function: TestCase() -> Info
 %% Info = [tuple()]
-%%--------------------------------------------------------------------
-simple() -> [].
+%% -----------------------------------------------------------------------------
 
 simple(_Config) ->
     % open a new database
@@ -204,21 +268,15 @@ simple(_Config) ->
     % close an already closed database
     ok = cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#First-steps
-%%--------------------------------------------------------------------
-tutorial_intro() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_intro(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M, E, Path} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_intro_fun/1, Mapping).
-
-tutorial_intro_fun({Module, Engine, Path} = Term) ->
-    Res = ?COZO_OPEN(Module, Engine, Path),
-    ?assertMatch({ok, _}, Res, Term),
+    Res = cozodb:open(Engine, Path),
+    ?assertMatch({ok, _}, Res),
     {ok, Db} = Res,
     ?QUERY_OK(Db, "?[] <- [['hello', 'world', 'Cozo!']]"),
     ?QUERY_OK(Db, "?[] <- [[1, 2, 3], ['a', 'b', 'c']]"),
@@ -226,22 +284,16 @@ tutorial_intro_fun({Module, Engine, Path} = Term) ->
               "['aA', 'bB', 'cC', 'dD', 'eE'],"
               "[true, false, null, -1.4e-2, \"A string with double quotes\"]]"),
     ?QUERY_OK(Db, "?[] <- [[1], [2], [1], [2], [1]]"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Expressions
-%%--------------------------------------------------------------------
-tutorial_expressions() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_expressions(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_expressions_fun/1, Mapping).
-
-tutorial_expressions_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    {ok, Db} = cozodb:open(Engine, Path),
     ?QUERY_OK(Db, "?[] <- [["
               "1 + 2,"
               "3 / 4,"
@@ -257,22 +309,16 @@ tutorial_expressions_fun({Module, Engine, Path}) ->
               "b[y, z] <- [[2, 3], [2, 4]]"
               "?[x, y, z] := a[x, y], b[y, z]"
               "?[x, y, z] := a[x, y], not b[y, _], z = null"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Joins,-made-easy
-%%--------------------------------------------------------------------
-tutorial_rules() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_rules(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_rules_fun/1, Mapping).
-
-tutorial_rules_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    {ok, Db} = cozodb:open(Engine, Path),
     ?QUERY_OK(Db, "?[first, second, third] <- [[1, 2, 3], ['a', 'b', 'c']]"),
     ?QUERY_OK(Db, "rule[first, second, third] <- [[1, 2, 3], ['a', 'b', 'c']]"
               "?[a, b, c] := rule[a, b, c]"),
@@ -285,21 +331,15 @@ tutorial_rules_fun({Module, Engine, Path}) ->
     ?QUERY_OK(Db, "rule[first, second, third] <- [[1, 2, 3], ['a', 'b', 'c']]"
               "?[c, b, d] := rule[a, b, c], is_num(a), d = a + b + 2*c"),
     ?QUERY_OK(Db, "?[x, y] := x in [1, 2, 3], y in ['x', 'y']"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Joins,-made-easy
-%%--------------------------------------------------------------------
-tutorial_joins() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_joins(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E, Path} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_joins_fun/1, Mapping).
-
-tutorial_joins_fun({Module, Engine, Path}) ->
     ?QUERY_OK("r1[] <- [[1, 'a'], [2, 'b']]"
               "r2[] <- [[2, 'B'], [3, 'C']]"
               "?[l1, l2] := r1[a, l1], r2[b, l2]"),
@@ -314,20 +354,14 @@ tutorial_joins_fun({Module, Engine, Path}) ->
               "?[x, y, z] := a[x, y], b[y, z]"
               "?[x, y, z] := a[x, y], not b[y, _], z = null").
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Stored-relations
-%%--------------------------------------------------------------------
-tutorial_stored_relations() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_stored_relations(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E, Path} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_stored_relations_fun/1, Mapping).
-
-tutorial_stored_relations_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    {ok, Db} = cozodb:open(Engine, Path),
     ?IQUERY_LOG(Db, ":create stored {c1, c2}"),
     ?IQUERY_LOG(Db, ":create dept_info {"
                 "company_name: String,"
@@ -358,40 +392,30 @@ tutorial_stored_relations_fun({Module, Engine, Path}) ->
     ?IQUERY_LOG(Db, "::remove stored"),
     ?IQUERY_LOG(Db, "::relations"),
     ?IQUERY_LOG(Db, "::remove fd"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Command-blocks
-%%--------------------------------------------------------------------
-tutorial_command_blocks() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_command_blocks(Config) ->
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_command_blocks_fun/1, Mapping).
-
-tutorial_command_blocks_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
     ?IQUERY_LOG(Db, "{?[a] <- [[1], [2], [3]]; :replace test {a}}"
                 "{?[a] <- []; :replace test2 {a}}"
                 "%swap test test2"
                 "%return test"),
-    ok = Module:close(Db).
+    ok = cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Graphs
-%%--------------------------------------------------------------------
-tutorial_graphs() -> [].
+%% -----------------------------------------------------------------------------
 
 tutorial_graphs(Config) ->
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
-    lists:map(fun tutorial_graphs_fun/1, Mapping).
-
-tutorial_graphs_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
     ?IQUERY_LOG(Db, "?[loving, loved] <- [['alice', 'eve'],"
                 "['bob', 'alice'],"
                 "['eve', 'alice'],"
@@ -458,25 +482,20 @@ tutorial_graphs_fun({Module, Engine}) ->
                 ":order -page_rank"),
 
     ?IQUERY_LOG(Db, "::remove love"),
-    ok = Module:close(Db).
+    ok = cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% https://docs.cozodb.org/en/latest/tutorial.html#Extended-example:-the-air-routes-dataset
-%%--------------------------------------------------------------------
-air_routes() -> [].
+%% -----------------------------------------------------------------------------
 
 air_routes(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
     %% Test data sources directory
     DataDir = proplists:get_value(data_dir, Config, "test/cozodb_SUITE_data"),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {DataDir, M,E} || M <- Modules, E <- Engines ],
-    lists:map(fun air_routes_fun/1, Mapping).
-
-air_routes_fun({DataDir, Module, Engine}) ->
     {ok, RawAirRoutes} = file:read_file(filename:join(DataDir, "air-routes.json")),
     {ok, AirRoutes} = thoas:decode(RawAirRoutes),
-    {ok, Db} = Module:open(Engine),
+    {ok, Db} = cozodb:open(Engine, Path),
     ?IQUERY_LOG(Db, "{:create airport {"
                 "code: String"
                 "=>"
@@ -508,7 +527,7 @@ air_routes_fun({DataDir, Module, Engine}) ->
 
     ?IQUERY_LOG(Db, "{:create route { fr: String, to: String => dist: Float }}"),
 
-    Module:import_from_backup(Db, AirRoutes),
+    cozodb:import_from_backup(Db, AirRoutes),
 
     ?IQUERY_LOG(Db, "::relations"),
 
@@ -669,272 +688,246 @@ air_routes_fun({DataDir, Module, Engine}) ->
                 ":order -score"
                 ":limit 5"),
 
-    ok = Module:close(Db).
+    ok = cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-sqlite() -> [].
-
+%% -----------------------------------------------------------------------------
 sqlite(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun sqlite_fun/1, Mapping).
-
-sqlite_fun({Module, _Engine, Path}) ->
     % create a new cozo database using sqlite
-    {ok, Db} = ?COZO_OPEN(Module, sqlite, filename:join(Path, "/sqlite")),
+    {ok, Db} = cozodb:open(sqlite, filename:join([Path, "data.sqlite"])),
 
-    #{path := DbPath} = Module:info(Db),
+    #{path := DbPath} = cozodb:info(Db),
     true = filelib:is_file(DbPath),
-    {ok, _} = Module:run(Db, "?[] <- [[1, 2, 3]]"),
-    %% {ok, _} = Module:create_relations(Db, "stored" "{c1, c2}"),
-    %% {ok, _} = Module:run(Db, ":create dept_info {"
+    {ok, _} = cozodb:run(Db, "?[] <- [[1, 2, 3]]"),
+    %% {ok, _} = cozodb:create_relations(Db, "stored" "{c1, c2}"),
+    %% {ok, _} = cozodb:run(Db, ":create dept_info {"
     %%       "company_name: String,"
     %%       "department_name: String,"
     %%       "=>"
     %%       "head_count: Int default 0,"
     %%       "address: String,"
     %%       "}"),
-    %% {ok, _} = Module:run(Db, "?[a, b, c] <- [[1, 'a', 'A'],"
+    %% {ok, _} = cozodb:run(Db, "?[a, b, c] <- [[1, 'a', 'A'],"
     %%           "[2, 'b', 'B'],"
     %%           "[3, 'c', 'C'],"
     %%           "[4, 'd', 'D']]"),
-    ?COZO_CLOSE(Module, Db),
+    cozodb:close(Db),
 
     % Reopen the database
-    {ok, Db2} = Module:open(sqlite, DbPath),
-    #{path := DbPath} = Module:info(Db2),
+    {ok, Db2} = cozodb:open(sqlite, DbPath),
+    #{path := DbPath} = cozodb:info(Db2),
     true = filelib:is_file(DbPath),
-    {ok, _} = Module:run(Db2, "?[] <- [[1, 2, 3]]"),
-    {ok, _} = Module:run(Db2, "?[a, b, c] <- [[1, 'a', 'A'],"
+    {ok, _} = cozodb:run(Db2, "?[] <- [[1, 2, 3]]"),
+    {ok, _} = cozodb:run(Db2, "?[a, b, c] <- [[1, 'a', 'A'],"
            "[2, 'b', 'B'],"
            "[3, 'c', 'C'],"
            "[4, 'd', 'D']]"),
-    ?COZO_CLOSE(Module, Db2),
+    ok = cozodb:close(Db2),
 
     % cleanup the file
     file:delete(DbPath).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-rocksdb() -> [].
+%% -----------------------------------------------------------------------------
 
 rocksdb(Config) ->
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
-    lists:map(fun rocksdb_fun/1, Mapping).
-
-rocksdb_fun({Module, _Engine}) ->
-    {ok, Db} = Module:open(rocksdb),
-    #{path := DbPath} = Module:info(Db),
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(rocksdb, Path),
+    #{path := DbPath} = cozodb:info(Db),
     true = filelib:is_dir(DbPath),
-    {ok, _} = Module:run(Db, "?[] <- [[1, 2, 3]]"),
-    %% {ok, _} = Module:create_relations(Db, "stored", [{c1, c2}]),
-    %% {ok, _} = Module:run(Db, ":create dept_info {"
+    {ok, _} = cozodb:run(Db, "?[] <- [[1, 2, 3]]"),
+    %% {ok, _} = cozodb:create_relations(Db, "stored", [{c1, c2}]),
+    %% {ok, _} = cozodb:run(Db, ":create dept_info {"
     %%       "company_name: String,"
     %%       "department_name: String,"
     %%       "=>"
     %%       "head_count: Int default 0,"
     %%       "address: String,"
     %%       "}"),
-    %% {ok, _} = Module:run(Db, "?[a, b, c] <- [[1, 'a', 'A'],"
+    %% {ok, _} = cozodb:run(Db, "?[a, b, c] <- [[1, 'a', 'A'],"
     %%           "[2, 'b', 'B'],"
     %%           "[3, 'c', 'C'],"
     %%           "[4, 'd', 'D']]"),
-    Module:close(Db),
+    cozodb:close(Db),
 
-    {ok, Db2} = Module:open(rocksdb, DbPath),
-    #{path := DbPath} = Module:info(Db2),
+    {ok, Db2} = cozodb:open(rocksdb, DbPath),
+    #{path := DbPath} = cozodb:info(Db2),
     true = filelib:is_dir(DbPath),
-    {ok, _} = Module:run(Db2, "?[] <- [[1, 2, 3]]"),
-    {ok, _} = Module:run(Db2, "?[a, b, c] <- [[1, 'a', 'A'],"
+    {ok, _} = cozodb:run(Db2, "?[] <- [[1, 2, 3]]"),
+    {ok, _} = cozodb:run(Db2, "?[a, b, c] <- [[1, 'a', 'A'],"
            "[2, 'b', 'B'],"
            "[3, 'c', 'C'],"
            "[4, 'd', 'D']]"),
-    Module:close(Db2).
+    cozodb:close(Db2).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-maintenance_commands() -> [].
-
+%% -----------------------------------------------------------------------------
 maintenance_commands(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E, Path} || M <- Modules, E <- Engines ],
-    lists:map(fun maintenance_commands_fun/1, Mapping).
-
-
-maintenance_commands_fun({Module, Engine, Path}) ->
     EngineName = atom_to_list(Engine),
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
-    #{path := DbPath} = Module:info(Db),
+    {ok, Db} = cozodb:open(Engine, Path),
+    #{path := DbPath} = cozodb:info(Db),
 
-    {ok, _} = Module:run(Db, "?[] <- [[1,2,3]]"),
+    {ok, _} = cozodb:run(Db, "?[] <- [[1,2,3]]"),
 
-    ok = Module:create_relation(Db, "stored", #{
+    ok = cozodb:create_relation(Db, "stored", #{
         columns => ["c1"]
     }),
-    ok = Module:create_relation(Db, "stored2", #{
+    ok = cozodb:create_relation(Db, "stored2", #{
         columns => [c1, "c2", <<"c3">>]
     }),
-    ok = Module:create_relation(Db, stored3, #{
+    ok = cozodb:create_relation(Db, stored3, #{
         columns => [c1]
     }),
-    ok = Module:create_relation(Db, stored4, #{
+    ok = cozodb:create_relation(Db, stored4, #{
         columns => [c1, c2, c3]
     }),
-    ok = Module:create_relation(Db, stored5, #{
+    ok = cozodb:create_relation(Db, stored5, #{
         columns => ["c1", c2, "c3", c4]
     }),
     % import/export relations
     % wrong json lead to an error
     ?assertError(
         {badarg,"invalid JSON key '{}'"},
-        Module:import(Db, #{ {} => {} })
+        cozodb:import(Db, #{ {} => {} })
     ),
     Relations = #{stored => #{headers => [c1,c2], rows => []}},
-    ok = Module:import(Db, Relations),
-    {ok, _} = Module:export(Db, [<<"stored">>]),
+    ok = cozodb:import(Db, Relations),
+    {ok, _} = cozodb:export(Db, [<<"stored">>]),
 
     % backup/restore database
     BackupPath = binary_to_list(DbPath) ++ "_" ++ EngineName ++ ".backup",
-    ok = Module:backup(Db, BackupPath),
-    ok = Module:restore(Db, BackupPath),
+    ok = cozodb:backup(Db, BackupPath),
+
+    %% Destroy db completely
+    case Engine of
+        sqlite ->
+            file:delete(Path);
+        _ ->
+            ok = cozodb:close(Db),
+            ok = file:del_dir_r(Path),
+            ok = file:make_dir(Path)
+    end,
+
+
+    {ok, Db1} = cozodb:open(Engine, Path),
+    ok = cozodb:restore(Db1, BackupPath),
     ct:pal(info, ?LOW_IMPORTANCE, "~p", [{BackupPath}]),
 
     % restore from json
     % {ok, Backup} = file:read_file(BackupPath),
     % BackupJson = binary_to_list(Backup),
-    % {ok, _} = Module:import_from_backup(Db, BackupJson),
+    % {ok, _} = cozodb:import_from_backup(Db, BackupJson),
 
     % delete relation one by one
-    ok = Module:remove_relation(Db, "stored"),
-    ok = Module:remove_relation(Db, "stored2"),
+    ok = cozodb:remove_relation(Db1, "stored"),
+    ok = cozodb:remove_relation(Db1, "stored2"),
 
     % delete many relations
-    ok = Module:remove_relations(Db, ["stored3", "stored4", "stored5"]),
+    ok = cozodb:remove_relations(Db1, ["stored3", "stored4", "stored5"]),
 
-    ok = ?COZO_CLOSE(Module, Db).
+    ok = cozodb:close(Db1).
 
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-system_commands() -> [].
-
+%% -----------------------------------------------------------------------------
 system_commands(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun system_commands_fun/1, Mapping).
-
-system_commands_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
-    #{path := _DbPath} = Module:info(Db),
+    {ok, Db} = cozodb:open(Engine, Path),
+    #{path := _DbPath} = cozodb:info(Db),
 
     % create relations
-    ok = Module:create_relation(Db, "stored", #{
+    ok = cozodb:create_relation(Db, "stored", #{
         columns => ["c1"]
     }),
-    ok = Module:create_relation(Db, "stored2", #{
+    ok = cozodb:create_relation(Db, "stored2", #{
         columns => [c1, "c2", <<"c3">>]
     }),
-    ok = Module:create_relation(Db, stored3, #{
+    ok = cozodb:create_relation(Db, stored3, #{
         columns => [c1]
     }),
-    ok = Module:create_relation(Db, stored4, #{
+    ok = cozodb:create_relation(Db, stored4, #{
         columns => [c1, c2, c3]
     }),
-    ok = Module:create_relation(Db, stored5, #{
+    ok = cozodb:create_relation(Db, stored5, #{
         columns => ["c1", c2, "c3", c4]
     }),
 
     % list available relations
-    {ok, _} = Module:relations(Db),
+    {ok, _} = cozodb:relations(Db),
 
     % explain a query
-    {ok, _} = Module:explain(Db, "?[] <- [[1,2,3]]"),
+    {ok, _} = cozodb:explain(Db, "?[] <- [[1,2,3]]"),
 
     % list columns and indices
-    {ok, _} = Module:columns(Db, "stored"),
-    {ok, _} = Module:indices(Db, "stored"),
+    {ok, _} = cozodb:columns(Db, "stored"),
+    {ok, _} = cozodb:indices(Db, "stored"),
 
     % error during describe
-    % {ok, _} = Module:describe(Db, "stored", "test").
+    % {ok, _} = cozodb:describe(Db, "stored", "test").
 
-    {ok, _} = Module:triggers(Db, "stored"),
-    {ok, _} = Module:running(Db),
-    ok = Module:compact(Db),
+    {ok, _} = cozodb:triggers(Db, "stored"),
+    {ok, _} = cozodb:running(Db),
+    ok = cozodb:compact(Db),
 
     %% % individual access level
-    %% {ok, _} = Module:set_access_level(Db, hidden, "stored"),
-    %% {ok, _} = Module:set_access_level(Db, read_only, "stored"),
-    %% {ok, _} = Module:set_access_level(Db, protected, "stored"),
-    %% {ok, _} = Module:set_access_level(Db, normal, "stored"),
+    %% {ok, _} = cozodb:set_access_level(Db, hidden, "stored"),
+    %% {ok, _} = cozodb:set_access_level(Db, read_only, "stored"),
+    %% {ok, _} = cozodb:set_access_level(Db, protected, "stored"),
+    %% {ok, _} = cozodb:set_access_level(Db, normal, "stored"),
 
     %% % multi set access level
-    %% {ok, _} = Module:set_access_levels(Db, hidden, ["stored2", "stored3"]),
-    %% {ok, _} = Module:set_access_levels(Db, read_only, ["stored2", "stored3"]),
-    %% {ok, _} = Module:set_access_levels(Db, protected, ["stored2", "stored3"]),
-    %% {ok, _} = Module:set_access_levels(Db, normal, ["stored2", "stored3"]),
+    %% {ok, _} = cozodb:set_access_levels(Db, hidden, ["stored2", "stored3"]),
+    %% {ok, _} = cozodb:set_access_levels(Db, read_only, ["stored2", "stored3"]),
+    %% {ok, _} = cozodb:set_access_levels(Db, protected, ["stored2", "stored3"]),
+    %% {ok, _} = cozodb:set_access_levels(Db, normal, ["stored2", "stored3"]),
 
     % remove relations
-    ok = Module:remove_relation(Db, "stored"),
-    ok = Module:remove_relations(Db, ["stored2", "stored3", "stored4"]),
+    ok = cozodb:remove_relation(Db, "stored"),
+    ok = cozodb:remove_relations(Db, ["stored2", "stored3", "stored4"]),
 
     % close database
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-index() -> [].
+%% -----------------------------------------------------------------------------
 
 index(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun index_fun/1, Mapping).
-
-index_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
-    {ok, _} = Module:run(Db, ":create r {a => b}"),
-    {ok, _} = Module:create_index(Db, "r", "idx", #{
+    {ok, Db} = cozodb:open(Engine, Path),
+    {ok, _} = cozodb:run(Db, ":create r {a => b}"),
+    {ok, _} = cozodb:create_index(Db, "r", "idx", #{
         type => covering,
         fields => [b, a]
     }),
-    {ok, _} = Module:indices(Db, "r"),
-    {ok, _} = Module:drop_index(Db, "r:idx"),
-    ?COZO_CLOSE(Module, Db).
+    {ok, _} = cozodb:indices(Db, "r"),
+    {ok, _} = cozodb:drop_index(Db, "r:idx"),
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-hnsw() -> [].
+%% -----------------------------------------------------------------------------
 
 hnsw(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun hnsw_fun/1, Mapping).
-
-hnsw_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    {ok, Db} = cozodb:open(Engine, Path),
     ok = cozodb:create_relation(Db, "table_hnsw_fun", #{
         keys => [{k, string}],
         columns => [{v, {vector, 32, 128}}]
     }),
-    {ok, _} = Module:create_index(Db, "table_hnsw_fun", "my_hsnw_index", #{
+    {ok, _} = cozodb:create_index(Db, "table_hnsw_fun", "my_hsnw_index", #{
         type => hnsw,
         dim => 128,
         m => 50,
@@ -947,27 +940,21 @@ hnsw_fun({Module, Engine, Path}) ->
         keep_pruned_connections => false
     }),
     {ok, _} = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-lsh() -> [].
+%% -----------------------------------------------------------------------------
 
 lsh(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun lsh_fun/1, Mapping).
-
-lsh_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    {ok, Db} = cozodb:open(Engine, Path),
     ok = cozodb:create_relation(Db, "table_lsh_fun", #{
         keys => [{k, string}],
         columns => [{v, #{type => string, nullable => true}}]
     }),
-    {ok, _} = Module:create_index(Db, "table_lsh_fun", "my_lsh_index", #{
+    {ok, _} = cozodb:create_index(Db, "table_lsh_fun", "my_lsh_index", #{
         type => lsh,
         extractor => v,
         extract_filter => "!is_null(v)",
@@ -980,27 +967,21 @@ lsh_fun({Module, Engine, Path}) ->
         false_negative_weight => 1.0
     }),
     {ok, _} = cozodb:drop_index(Db, "table_lsh_fun", "my_lsh_index"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %%
-%%--------------------------------------------------------------------
-fts() -> [].
+%% -----------------------------------------------------------------------------
 
 fts(Config) ->
+    Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    Engines = proplists:get_value(engines, Config, ?ENGINES),
-    Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
-    lists:map(fun fts_fun/1, Mapping).
-
-fts_fun({Module, Engine, Path}) ->
-    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    {ok, Db} = cozodb:open(Engine, Path),
     ok = cozodb:create_relation(Db, "table_fts_fun", #{
         keys => [{k, string}],
         columns => [{v, #{type => string, nullable => true}}]
     }),
-    {ok, _} = Module:create_index(Db, "table_fts_fun", "my_fts_index", #{
+    {ok, _} = cozodb:create_index(Db, "table_fts_fun", "my_fts_index", #{
         type => fts,
         extractor => v,
         extract_filter => "!is_null(v)",
@@ -1008,13 +989,12 @@ fts_fun({Module, Engine, Path}) ->
         filters => [alphanumonly]
     }),
     {ok, _} = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
-    ?COZO_CLOSE(Module, Db).
+    cozodb:close(Db).
 
-%%--------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% Function: TestCase() -> Info
 %% Info = [tuple()]
-%%--------------------------------------------------------------------
-multi_spawn() -> [].
+%% -----------------------------------------------------------------------------
 
 multi_spawn(_Config) ->
     [ cozo_spawn(100)

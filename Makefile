@@ -1,5 +1,6 @@
 REBAR3 ?= $(shell test -e `which rebar3` 2>/dev/null && which rebar3 || echo "./rebar3")
 
+COZODB_TMP_DIR ?= "/tmp/cozodb/"
 
 .PHONY: all
 all: build
@@ -41,7 +42,7 @@ eunit:
 
 .PHONY: ct
 ct:
-	@$(REBAR3) ct
+	@COZODB_TMP_DIR=$(COZODB_TMP_DIR) $(REBAR3) ct
 
 .PHONY: xref
 xref:

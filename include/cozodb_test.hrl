@@ -101,11 +101,12 @@
 -define(IQUERY_LOG(DB, QUERY),
         begin
             (fun() ->
-                     {ok, _} = cozodb:run(DB, QUERY),
+                     {ok, _} = Res = cozodb:run(DB, QUERY),
                      LogFormat = "db: ~p~n"
              "query: ~s~n",
              % "result: ~p",
                      LogArgs = [DB,QUERY],
-                     ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs)
+                     ct:pal(info, ?LOW_IMPORTANCE, LogFormat, LogArgs),
+                     Res
              end)()
         end).

@@ -72,7 +72,7 @@
 %% Function: suite() -> Info
 %% Info = [tuple()]
 %% -----------------------------------------------------------------------------
-suite() -> [{timetrap,{seconds,30}}].
+suite() -> [{timetrap,{seconds, 240}}].
 
 %% -----------------------------------------------------------------------------
 %% Function: init_per_suite(Config0) ->
@@ -203,7 +203,7 @@ all_cases() ->
         , hnsw
         , lsh
         , fts
-        %% , air_routes
+        , air_routes
     ].
 
 
@@ -491,11 +491,10 @@ tutorial_graphs(Config) ->
 air_routes(Config) ->
     Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
-    %% Test data sources directory
-    DataDir = proplists:get_value(data_dir, Config, "test/cozodb_SUITE_data"),
-    {ok, RawAirRoutes} = file:read_file(filename:join(DataDir, "air-routes.json")),
-    {ok, AirRoutes} = thoas:decode(RawAirRoutes),
     {ok, Db} = cozodb:open(Engine, Path),
+
+    %% Setup database relations
+
     ?IQUERY_LOG(Db, "{:create airport {"
                 "code: String"
                 "=>"
@@ -527,9 +526,18 @@ air_routes(Config) ->
 
     ?IQUERY_LOG(Db, "{:create route { fr: String, to: String => dist: Float }}"),
 
-    cozodb:import_from_backup(Db, AirRoutes),
+    {ok, #{rows := Rows}} = cozodb:relations(Db),
+    RelNames = [hd(Row) || Row <- Rows],
 
-    ?IQUERY_LOG(Db, "::relations"),
+     %% Test data sources directory
+    DataDir = proplists:get_value(data_dir, Config, "test/cozodb_SUITE_data"),
+    DataFile = filename:join(DataDir, "air-routes.json"),
+    {ok, RawAirRoutes} = file:read_file(DataFile),
+    {ok, AirRoutes} = thoas:decode(RawAirRoutes),
+    cozodb:import(Db, AirRoutes),
+
+    %% cozodb:import_from_backup(Db, DataFile, RelNames),
+
 
     ?IQUERY_LOG(Db, "?[code, city, desc, region, runways, lat, lon]"
                 ":= *airport{code, city, desc, region, runways, lat, lon}"
@@ -599,11 +607,33 @@ air_routes(Config) ->
                 "dist = d1 + d2"
                 "?[dist] := shortest['YPO', dist]"),
 
-    ?IQUERY_LOG(Db, "shortest[a, b, min(dist)] := *route{fr: a, to: b, dist}"
-                "shortest[a, b, min(dist)] := shortest[a, c, d1],"
-                "*route{fr: c, to: b, dist: d2},"
-                "dist = d1 + d2"
-                "?[dist] := shortest['LHR', 'YPO', dist]"),
+    %% From https://docs.cozodb.org/en/latest/tutorial.html
+    %% You will find that the query does not complete in a reasonable amount of
+    %% time, despite it being equivalent to the original query. Why?
+    %% In the changed query, you are asking the database to compute the all-pair
+    %% shortest path, and then extract the answer to a particular shortest path.
+    %% Normally Cozo would apply a technique called magic set rewrite so that
+    %% only the needed answer would be calculated. However, in the changed query
+    %% the presence of the aggregation operator min prevents that. In this case,
+    %% applying the rewrite to the variable a would still yield the correct
+    %% answer, but rewriting in any other way would give complete nonsense, and
+    %% in the more general case with recursive aggregations this is a can of
+    %% worms.
+    %% So as explained in the chapter about execution, magic set rewrites are
+    %% only applied to rules without aggregations or recursions for the moment,
+    %% until we are sure of the exact conditions under which the rewrites are
+    %% safe. So for now at least the database executes the query as written,
+    %% computing the result of the shortest rule containing more than ten
+    %% million rows (to be exact, 3700 * 3700 = 13,690,000 rows) first!
+    %%
+    %% The bottom line is, be mindful of the cardinality of the return sets of
+    %% recursive rules.
+    %%
+    %% ?IQUERY_LOG(Db, "shortest[a, b, min(dist)] := *route{fr: a, to: b, dist}"
+    %%             "shortest[a, b, min(dist)] := shortest[a, c, d1],"
+    %%             "*route{fr: c, to: b, dist: d2},"
+    %%             "dist = d1 + d2"
+    %%             "?[dist] := shortest['LHR', 'YPO', dist]"),
 
     ?IQUERY_LOG(Db, "starting[] <- [['LHR']]"
                 "goal[] <- [['YPO']]"

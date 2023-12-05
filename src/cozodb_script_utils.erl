@@ -365,7 +365,7 @@ when (Type == lsh orelse Type == fts) andalso is_list(Filters) ->
         [] ->
             [];
         Encoded ->
-            ["filters: [", Encoded, " ]"]
+            ["filters: [", Encoded, "]"]
     end;
 
 encode_index_entry(Type, filters, _) when Type == lsh; Type == fts ->
@@ -387,7 +387,10 @@ when (
     K == false_positive_weight orelse
     K ==  false_negative_weight
     ) andalso is_float(N) andalso N > 0.0 ->
-    <<(atom_to_binary(K))/binary, ": ", (float_to_binary(N))/binary>>;
+    <<
+        (atom_to_binary(K))/binary,
+        ": ",
+        (float_to_binary(N, [{decimals, 2}, compact]))/binary>>;
 
 encode_index_entry(lsh, K, _)
 when K == target_threshold orelse
@@ -778,8 +781,101 @@ encode_hsnw_index_test() ->
             "fields: [v], "
             "filter: k != 'foo', "
             "keep_pruned_connections: false, "
-            "m: 50 "
-            "}"
+            "m: 50"
+            " }"
+        >>,
+        iolist_to_binary(encode_index_spec(Spec))
+    ).
+
+
+
+encode_lsh_index_test() ->
+    Spec = #{
+        type => lsh,
+        extractor => v,
+        extract_filter => "!is_null(v)",
+        tokenizer => simple,
+        filters => [alphanumonly],
+        n_perm => 200,
+        target_threshold => 0.7,
+        n_gram => 3,
+        false_positive_weight => 1.0,
+        false_negative_weight => 1.0
+    },
+
+    %% Check required keys: [type, extractor, tokenizer, n_perm, n_gram,
+    %% target_threshold]
+
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([type], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([extractor], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([tokenizer], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([n_perm], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([n_gram], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(
+            encode_index_spec(maps:without([target_threshold], Spec)
+        ))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'n_perm' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{n_perm => -1}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'n_perm' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{n_perm => 0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'n_perm' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{n_perm => 1.0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'n_gram' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{n_gram => -1}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'n_gram' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{n_gram => 0}))
+    ),
+
+    ?assertError(
+        {badarg, "value for key 'n_gram' is not a positive integer"},
+        iolist_to_binary(encode_index_spec(Spec#{n_gram => 1.0}))
+    ),
+
+    ?assertEqual(
+        <<
+            "{ "
+            "extract_filter: !is_null(v), "
+            "extractor: v, "
+            "false_negative_weight: 1.0, "
+            "false_positive_weight: 1.0, "
+            "filters: [AlphaNumOnly], "
+            "n_gram: 3, "
+            "n_perm: 200, "
+            "target_threshold: 0.7, "
+            "tokenizer: Simple"
+            " }"
         >>,
         iolist_to_binary(encode_index_spec(Spec))
     ).

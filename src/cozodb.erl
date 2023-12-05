@@ -102,13 +102,13 @@
                                 }.
 -type lsh_index_spec()      ::  #{
                                     type := lsh,
-                                    extractor => column_name(),
+                                    extractor := column_name(),
+                                    tokenizer := tokenizer(),
+                                    n_perm := pos_integer(),
+                                    n_gram := pos_integer(),
+                                    target_threshold := float(),
                                     extract_filter => extract_filter(),
-                                    tokenizer => tokenizer(),
                                     filters => [token_filter()],
-                                    n_perm => pos_integer(),
-                                    n_gram => pos_integer(),
-                                    target_threshold => float(),
                                     false_positive_weight => float(),
                                     false_negative_weight=> float()
                                 }.
@@ -1066,7 +1066,6 @@ restore_nif(_Db, _Path) ->
     ?NIF_NOT_LOADED.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -1115,7 +1114,6 @@ unregister_callback_nif(_Db, _Id) ->
 new(Engine, Path, Opts)
 when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
     try
-        %% Call NIF
         new_nif(Engine, Path, Opts)
     catch
         Class:Reason:Stacktrace ->

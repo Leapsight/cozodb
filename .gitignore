@@ -21,3 +21,4 @@ target
 Cargo.lock
 crates.hrl
 priv/crates
+/doc

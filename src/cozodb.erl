@@ -157,39 +157,40 @@
 -type export_opts()         ::  #{encoding => json}.
 -type info()                ::  #{engine := binary(), path := binary()}.
 
+%% API: Basics
+-export([close/1]).
 -export([open/0]).
 -export([open/1]).
 -export([open/2]).
 -export([open/3]).
--export([close/1]).
 -export([run/2]).
 -export([run/3]).
 
-%% APi: System Catalogue
--export([relations/1]).
--export([create_relation/3]).
--export([remove_relation/2]).
--export([remove_relations/2]).
+%% API: System Catalogue
 -export([columns/2]).
--export([indices/2]).
 -export([create_index/4]).
+-export([create_relation/3]).
 -export([drop_index/2]).
 -export([drop_index/3]).
+-export([indices/2]).
+-export([relations/1]).
+-export([remove_relation/2]).
+-export([remove_relations/2]).
 
 %% API: Utils
--export([rows_to_maps/1]).
--export([info/1]).
 -export([explain/2]).
+-export([info/1]).
+-export([rows_to_maps/1]).
 
 %% API: Operations
+-export([backup/2]).
 -export([export/2]).
 -export([export/3]).
 -export([import/2]).
--export([register_callback/2]).
--export([unregister_callback/2]).
--export([backup/2]).
--export([restore/2]).
 -export([import_from_backup/3]).
+-export([register_callback/2]).
+-export([restore/2]).
+-export([unregister_callback/2]).
 %% -export([register_fixed_rule/2]).
 %% -export([unregister_fixed_rule/2]).
 
@@ -447,7 +448,8 @@ export(Db, RelNames, _) when is_reference(Db), is_list(RelNames) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Exports the database to a SQLite file at `Path'.
+%% To restore the database using this file see {@link restore/2}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec backup(Db :: reference(), Path :: path()) ->
@@ -485,7 +487,7 @@ import_from_backup(Db, Path, Relations) when is_list(Path), Path =/= [] ->
     import_from_backup(Db, list_to_binary(Path), Relations);
 
 import_from_backup(Db, Path, Relations)
-when is_binary(Path), is_binary(Relations) ->
+when is_binary(Path), is_list(Relations) ->
     import_from_backup_nif(Db, Path, Relations).
 
 

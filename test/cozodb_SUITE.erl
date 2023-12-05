@@ -798,7 +798,7 @@ maintenance_commands_fun({Module, Engine, Path}) ->
         {badarg,"invalid JSON key '{}'"},
         Module:import(Db, #{ {} => {} })
     ),
-    Relations = #{ stored => #{ headers => [c1,c2], rows => [] }},
+    Relations = #{stored => #{headers => [c1,c2], rows => []}},
     ok = Module:import(Db, Relations),
     {ok, _} = Module:export(Db, [<<"stored">>]),
 
@@ -919,14 +919,14 @@ index_fun({Module, Engine}) ->
 hnsw() -> [].
 
 hnsw(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
     lists:map(fun hnsw_fun/1, Mapping).
 
-hnsw_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
-    _ = cozodb:remove_relation(Db, "table_hnsw_fun"),
+hnsw_fun({Module, Engine, Path}) ->
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
     ok = cozodb:create_relation(Db, "table_hnsw_fun", #{
         keys => [{k, string}],
         columns => [{v, {vector, 32, 128}}]
@@ -944,7 +944,7 @@ hnsw_fun({Module, Engine}) ->
         keep_pruned_connections => false
     }),
     {ok, _} = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
-    Module:close(Db).
+    ?COZO_CLOSE(Module, Db).
 
 %%--------------------------------------------------------------------
 %%
@@ -952,13 +952,14 @@ hnsw_fun({Module, Engine}) ->
 lsh() -> [].
 
 lsh(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
     lists:map(fun lsh_fun/1, Mapping).
 
-lsh_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
+lsh_fun({Module, Engine, Path}) ->
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
     ok = cozodb:create_relation(Db, "table_lsh_fun", #{
         keys => [{k, string}],
         columns => [{v, #{type => string, nullable => true}}]
@@ -976,7 +977,7 @@ lsh_fun({Module, Engine}) ->
         false_negative_weight => 1.0
     }),
     {ok, _} = cozodb:drop_index(Db, "table_lsh_fun", "my_lsh_index"),
-    Module:close(Db).
+    ?COZO_CLOSE(Module, Db).
 
 %%--------------------------------------------------------------------
 %%
@@ -984,23 +985,27 @@ lsh_fun({Module, Engine}) ->
 fts() -> [].
 
 fts(Config) ->
+    Path = ?config(db_path, Config),
     Engines = proplists:get_value(engines, Config, ?ENGINES),
     Modules = proplists:get_value(modules, Config, [cozodb]),
-    Mapping = [ {M,E} || M <- Modules, E <- Engines ],
+    Mapping = [ {M,E,Path} || M <- Modules, E <- Engines ],
     lists:map(fun fts_fun/1, Mapping).
 
-fts_fun({Module, Engine}) ->
-    {ok, Db} = Module:open(Engine),
-    {ok, _} = Module:run(Db, ":create table {k: String => v: String?}"),
-    {ok, _} = Module:create_fts(Db, "table:index_name", "{"
-                                "extractor: v, "
-                                "extract_filter: !is_null(v), "
-                                "tokenizer: Simple, "
-                                "filters: [AlphaNumOnly], "
-                                "}"),
-    % @todo: fix crash
-    % {ok, _} = cozodb:delete_fts(Db, "table:index_name"),
-    Module:close(Db).
+fts_fun({Module, Engine, Path}) ->
+    {ok, Db} = ?COZO_OPEN(Module, Engine, Path),
+    ok = cozodb:create_relation(Db, "table_fts_fun", #{
+        keys => [{k, string}],
+        columns => [{v, #{type => string, nullable => true}}]
+    }),
+    {ok, _} = Module:create_index(Db, "table_fts_fun", "my_fts_index", #{
+        type => fts,
+        extractor => v,
+        extract_filter => "!is_null(v)",
+        tokenizer => simple,
+        filters => [alphanumonly]
+    }),
+    {ok, _} = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
+    ?COZO_CLOSE(Module, Db).
 
 %%--------------------------------------------------------------------
 %% Function: TestCase() -> Info

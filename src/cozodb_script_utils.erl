@@ -880,4 +880,43 @@ encode_lsh_index_test() ->
         iolist_to_binary(encode_index_spec(Spec))
     ).
 
+
+
+encode_fts_index_test() ->
+    Spec = #{
+        type => fts,
+        extractor => v,
+        extract_filter => "!is_null(v)",
+        tokenizer => simple,
+        filters => [alphanumonly]
+    },
+
+    %% Check required keys: [type, extractor, tokenizer, n_perm, n_gram,
+    %% target_threshold]
+
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([type], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([extractor], Spec)))
+    ),
+    ?assertError(
+        {badarg, "invalid specification"},
+        iolist_to_binary(encode_index_spec(maps:without([tokenizer], Spec)))
+    ),
+
+    ?assertEqual(
+        <<
+            "{ "
+            "extract_filter: !is_null(v), "
+            "extractor: v, "
+            "filters: [AlphaNumOnly], "
+            "tokenizer: Simple"
+            " }"
+        >>,
+        iolist_to_binary(encode_index_spec(Spec))
+    ).
+
 -endif.

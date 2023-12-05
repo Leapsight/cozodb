@@ -18,9 +18,90 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% <a href="https://www.cozodb.org/" target="_">CozoDB</a> is a A FOSS embeddable, transactional,
+%% relational-graph-vector database with time travelling capability, perfect as
+%% the long-term memory for LLMs and AI.
 %%
-%% == Working with Relations ==
-%% == Executing a Datalog Program ==
+%% This library implements the CozoDB bindings for Erlang (BEAM) as a NIF using
+%% Rustler.
+%% == Datalog Programs ==
+%% == Stored Relations ==
+%% == Working with Indices ==
+%% === Covering Indices ===
+%% === Proximity Indices ===
+%% These kinds of indices allow Cozo to perform fast searches for similar data.
+%% Cozo comes with three proximity index types:
+%% <ul>
+%% <li>The Hierarchincal Navigable Small World (HNSW) index is a graph-based
+%% index that allows for fast approximate nearest neighbor searches</li>
+%% <li>The MinHash-LSH index is a locality sensitive hash index that allows for
+%% fast approximate nearest neighbor searches</li>
+%% <li>The Full-text Search (FTS) index allows for fast string matches.</li>
+%% </ul>
+%%
+%% ==== HSNW ====
+%%
+%% ```
+%% {ok, _} = Module:create_index(Db, "table_hnsw_fun", "my_hsnw_index", #{
+%%     type => hnsw,
+%%     dim => 128,
+%%     m => 50,
+%%     ef_construction => 20,
+%%     dtype => f32,
+%%     distance => l2,
+%%     fields => [v],
+%%     filter => <<"k != 'foo'">>,
+%%     extend_candidates => false,
+%%     keep_pruned_connections => false
+%% }).
+%% '''
+%%
+%% ==== LSH Indices ====
+%%
+%% ```
+%% {ok, _} = Module:create_index(Db, "table_lsh_fun", "my_lsh_index", #{
+%%     type => lsh,
+%%     extractor => v,
+%%     extract_filter => "!is_null(v)",
+%%     tokenizer => simple,
+%%     filters => [alphanumonly],
+%%     n_perm => 200,
+%%     target_threshold => 0.7,
+%%     n_gram => 3,
+%%     false_positive_weight => 1.0,
+%%     false_negative_weight => 1.0
+%% }).
+%% '''
+%%
+%% ==== FTS Indices ====
+%% You can create an FTS index using {@link create_index/4}.
+%%
+%% The following example creates and index called `my_fts_index' on the relation
+%% `rel_a'.
+%%
+%% ```
+%% {ok, _} = Module:create_index(Db, "rel_a", "my_fts_index", #{
+%%     type => fts,
+%%     extractor => v,
+%%     extract_filter => "!is_null(v)",
+%%     tokenizer => simple,
+%%     filters => [alphanumonly]
+%% }).
+%% '''
+%%
+%% You can always use Cozo Script directly via {@link run/2}. For example, the
+%% following script is equivalent to the previous example.
+%%
+%% ```
+%% ::fts create rel_a:my_fts_index {
+%%     extractor: v,
+%%     extract_filter: !is_null(v),
+%%     tokenizer: Simple,
+%%     filters: [],
+%% }
+%% '''
+%% Check the full <a href="https://docs.cozodb.org/en/latest/vector.html#full-text-search-fts" target="_">FTS documentation</a>.
+%% == System Operations ==
 %% @end
 %% -----------------------------------------------------------------------------
 -module(cozodb).
@@ -77,9 +158,7 @@
 
 -type engine()              ::  mem | sqlite | rocksdb.
 -type engine_opts()         ::  map().
--type path()                ::  filename:filename() | binary().
--type db_opts()             ::  map().
--type index_type()          ::  covering | hnsw | lsh | fts.
+-type path()                ::  file:filename() | binary().
 -type index_spec()          ::  covering_index_spec()
                                 | hnsw_index_spec()
                                 | lsh_index_spec()
@@ -156,6 +235,18 @@
 -type validity()            ::  {float(), boolean()}.
 -type export_opts()         ::  #{encoding => json}.
 -type info()                ::  #{engine := binary(), path := binary()}.
+-type trigger_spec()        ::  #{trigger_event() => script()}.
+-type trigger_event()       ::  on_put | on_remove | on_replace.
+-type script()              ::  list() | binary().
+
+-export_type([script/0]).
+-export_type([index_spec/0]).
+-export_type([relation_spec/0]).
+-export_type([trigger_spec/0]).
+-export_type([query_result/0]).
+-export_type([row/0]).
+-export_type([column_name/0]).
+-export_type([info/0]).
 
 %% API: Basics
 -export([close/1]).
@@ -170,12 +261,16 @@
 -export([columns/2]).
 -export([create_index/4]).
 -export([create_relation/3]).
+-export([describe/3]).
 -export([drop_index/2]).
 -export([drop_index/3]).
 -export([indices/2]).
 -export([relations/1]).
 -export([remove_relation/2]).
 -export([remove_relations/2]).
+-export([triggers/2]).
+-export([set_triggers/3]).
+-export([delete_triggers/2]).
 
 %% API: Utils
 -export([explain/2]).
@@ -260,7 +355,7 @@ open(Engine, Path) ->
 %% present on `Path' before you call this function.
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(Engine :: engine(), Path :: path(), Opts :: db_opts()) ->
+-spec open(Engine :: engine(), Path :: path(), Opts :: engine_opts()) ->
     {ok, reference()} | {error, Reason :: any()} | no_return().
 
 open(Engine, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
@@ -311,7 +406,7 @@ info(Db) when is_reference(Db) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec run(Db :: reference(), Script :: list() | binary()) -> query_return().
+-spec run(Db :: reference(), Script :: script()) -> query_return().
 
 run(Db, Script) when Script == ""; Script == <<>> ->
     ?ERROR(badarg, [Db, Script], #{
@@ -390,7 +485,7 @@ when is_reference(Db), is_binary(Script), is_map(Opts) ->
 %%        rows => []
 %%    }
 %% }
-%% ```
+%% '''
 %% @end
 %% -----------------------------------------------------------------------------
 -spec import(Db :: reference(), Relations :: binary() | relations()) ->
@@ -657,7 +752,7 @@ indices(Db, RelName) ->
 %% </li>
 %% </ul>
 %%
-%% ==== Example ==
+%% ==== Example ====
 %% ```
 %% 1> Spec = #{
 %%     type => hnsw,
@@ -753,16 +848,14 @@ triggers(Db, RelName) ->
 -spec set_triggers(
     Db :: reference(),
     RelName :: binary() | list(),
-    Spec :: binary() | list()) -> query_return().
+    Specs :: [trigger_spec()]) -> query_return().
 
 set_triggers(Db, RelName, Spec) when is_list(RelName) ->
     set_triggers(Db, list_to_binary(RelName), Spec);
 
-set_triggers(Db, RelName, Spec) when is_list(Spec) ->
-    set_triggers(Db, RelName, list_to_binary(Spec));
-
-set_triggers(Db, RelName, Spec) ->
-    Cmd = <<"::set_triggers", $\s, RelName/binary, $\s, Spec/binary>>,
+set_triggers(Db, RelName, Spec) when is_binary(RelName), is_list(Spec) ->
+    Encoded = cozodb_script_utils:encode_triggers_spec(Spec),
+    Cmd = <<"::set_triggers", $\s, RelName/binary, $\n, Encoded/binary>>,
     run(Db, Cmd).
 
 
@@ -770,20 +863,11 @@ set_triggers(Db, RelName, Spec) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete_triggers(
-    Db :: reference(),
-    RelName :: binary() | list(),
-    Spec :: binary() | list()) -> query_return().
+-spec delete_triggers(Db :: reference(), RelName :: binary() | list()) ->
+    query_return().
 
-delete_triggers(Db, RelName, Spec) when is_list(RelName) ->
-    delete_triggers(Db, list_to_binary(RelName), Spec);
-
-delete_triggers(Db, RelName, Spec) when is_list(Spec) ->
-    delete_triggers(Db, RelName, list_to_binary(Spec));
-
-delete_triggers(Db, RelName, Spec) ->
-    Cmd = <<"::set_triggers", $\s, RelName/binary>>,
-    run(Db, Cmd).
+delete_triggers(Db, RelName) ->
+    set_triggers(Db, RelName, []).
 
 
 %% -----------------------------------------------------------------------------
@@ -1230,17 +1314,6 @@ map_to_json(Term) when is_map(Term) ->
 
 json_encoder() ->
     application:get_env(?APP, json_parser, thoas).
-
-
-%%--------------------------------------------------------------------
-%% @doc returns the default json decoder (thoas)
-%% @end
-%%--------------------------------------------------------------------
-%% -spec json_decoder() -> atom().
-
-%% json_decoder() ->
-%%     application:get_env(?APP, json_parser, thoas).
-
 
 
 %% =============================================================================

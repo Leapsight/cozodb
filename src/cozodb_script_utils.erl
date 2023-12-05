@@ -21,6 +21,7 @@
 %% API
 -export([encode_relation_spec/1]).
 -export([encode_index_spec/1]).
+-export([encode_triggers_spec/1]).
 
 
 
@@ -45,7 +46,7 @@ encode_relation_spec(Map) when is_map(Map), not is_map_key(keys, Map) ->
 encode_relation_spec(Map) when is_map(Map), not is_map_key(columns, Map) ->
     encode_relation_spec(Map#{columns => []});
 
-encode_relation_spec(#{keys := Keys, columns := Cols} = Spec) ->
+encode_relation_spec(#{keys := Keys, columns := Cols}) ->
     EncodedKeys =
         case encode_relation_columns(Keys) of
             [] ->
@@ -111,6 +112,24 @@ encode_index_spec(_) ->
     error({badarg, "invalid specification"}).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec encode_triggers_spec([cozodb:trigger_spec()]) -> return.
+
+encode_triggers_spec([]) ->
+    %% Valid case when deleting triggers
+    [];
+
+encode_triggers_spec(Specs) ->
+    L = [encode_trigger_spec(Spec) || Spec <- Specs],
+    lists:join("\n", L).
+
+
+
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -143,10 +162,10 @@ encode_relation_columns(Spec) when is_list(Spec) ->
                 Encoded = encode_column_type(Type),
                 [[$\s, Col, $:, $\s, Encoded] | Acc];
 
-            F({Col, #{type := Type} = Spec}, Acc) when is_binary(Col) ->
+            F({Col, #{type := Type} = ColSpec}, Acc) when is_binary(Col) ->
                 Encoded0 = encode_column_type(Type),
                 Encoded =
-                    case maps:get(nullable, Spec, false) of
+                    case maps:get(nullable, ColSpec, false) of
                         true ->
                             [Encoded0, $?];
                         false ->
@@ -168,7 +187,7 @@ encode_relation_columns(Spec) when is_list(Spec) ->
     ),
     lists:reverse(lists:join($,, Res));
 
-encode_relation_columns(Spec) ->
+encode_relation_columns(_Spec) ->
     error({badarg, "invalid specification"}).
 
 
@@ -484,6 +503,28 @@ encode_index_filter({stopwords, Lang}) when is_binary(Lang) ->
 
 encode_index_filter(_) ->
     error({badarg, "on or more values for filters are invalid"}).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+encode_trigger_spec({on_put, Script})
+when is_list(Script); is_binary(Script) ->
+    [<<"on put">>, $\s, ${, $\s, Script, $\s, $}];
+
+encode_trigger_spec({on_rm, Script})
+when is_list(Script); is_binary(Script) ->
+    [<<"on rm">>, $\s, ${, $\s, Script, $\s, $}];
+
+encode_trigger_spec({on_replace, Script})
+when is_list(Script); is_binary(Script) ->
+    [<<"on replace">>, $\s, ${, $\s, Script, $\s, $}];
+
+encode_trigger_spec({on_remove, Script}) ->
+    %% util
+    encode_trigger_spec({on_rm, Script}).
 
 
 
@@ -881,7 +922,6 @@ encode_lsh_index_test() ->
     ).
 
 
-
 encode_fts_index_test() ->
     Spec = #{
         type => fts,
@@ -917,6 +957,56 @@ encode_fts_index_test() ->
             " }"
         >>,
         iolist_to_binary(encode_index_spec(Spec))
+    ).
+
+
+encode_triggers_test() ->
+
+    ?assertEqual([], encode_triggers_spec([])),
+
+    ?assertEqual(
+        <<"on put { query goes here }">>,
+        iolist_to_binary(
+            encode_triggers_spec([{on_put, "query goes here"}])
+        )
+    ),
+
+    ?assertEqual(
+        <<"on rm { query goes here }">>,
+        iolist_to_binary(
+            encode_triggers_spec([{on_rm, "query goes here"}])
+        )
+    ),
+
+    ?assertEqual(
+        <<"on replace { query goes here }">>,
+        iolist_to_binary(
+            encode_triggers_spec([{on_replace, "query goes here"}])
+        )
+    ),
+
+    ?assertEqual(
+        <<"on rm { query goes here }">>,
+        iolist_to_binary(
+            encode_triggers_spec([{on_remove, "query goes here"}])
+        )
+    ),
+
+    ?assertEqual(
+        <<
+            "on put { query goes here }\n"
+            "on put { query goes here }\n"
+            "on rm { query goes here }\n"
+            "on replace { query goes here }"
+        >>,
+        iolist_to_binary(
+            encode_triggers_spec([
+                {on_put, "query goes here"},
+                {on_put, "query goes here"},
+                {on_remove, "query goes here"},
+                {on_replace, "query goes here"}
+            ])
+        )
     ).
 
 -endif.

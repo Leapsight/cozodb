@@ -33,7 +33,7 @@ use rustler::Env;
 use rustler::NifResult;
 use rustler::OwnedEnv;
 use rustler::NifMap;
-// use rustler::ResourceArc;
+use rustler::ResourceArc;
 use rustler::Term;
 use rustler::types::Pid;
 
@@ -91,6 +91,7 @@ rustler::init!("cozodb",
       new,
       close,
       info,
+      resource,
       run_script,
       run_script_str,
       run_script_json,
@@ -108,8 +109,9 @@ rustler::init!("cozodb",
 
 
 /// Define NIF Resources using rustler::resource! macro
-fn on_load(_env: Env, _: Term) -> bool {
+fn on_load(env: Env, _: Term) -> bool {
     // rustler::resource!(DbHandle, env);
+    rustler::resource!(DbHandleResource, env);
     true
 }
 
@@ -215,6 +217,10 @@ lazy_static! {
 /// A NIF Resource representing the identifier for a DbInstance handle.
 /// We use HANDLES to associate identifiers with Cozo's DbInstance Handles
 /// so that we can implement close().
+struct DbHandleResource {
+    db_instance: DbInstance
+}
+
 #[derive(NifMap)]
 struct DbHandle {
     db_id: i32,
@@ -404,27 +410,27 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
     let mut dbs = HANDLES.dbs.lock().unwrap();
     dbs.insert(id, db);
 
-    // Finally create and return a Nif Resource with the id and metadata
-    let resource = DbHandle {
+    // Finally create and return a DBHandle with the id and metadata
+    let db_handle = DbHandle {
         db_id: id,
         engine: engine,
         path: path
     };
-    Ok((atoms::ok().encode(env), resource).encode(env))
+    Ok((atoms::ok().encode(env), db_handle).encode(env))
 }
 
 
 /// Returns the result of running a script
 #[rustler::nif(schedule = "DirtyIo", name="close_nif")]
 
-fn close<'a>(env: Env<'a>, resource: Term<'a>) ->
+fn close<'a>(env: Env<'a>, db_handle: Term<'a>) ->
     NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db = {
         let mut dbs = HANDLES.dbs.lock().unwrap();
-        dbs.remove(&resource.db_id)
+        dbs.remove(&db_handle.db_id)
     };
     if db.is_some() {
         Ok(atoms::ok().encode(env))
@@ -438,22 +444,53 @@ fn close<'a>(env: Env<'a>, resource: Term<'a>) ->
 /// Returns the metadata associated with the resource
 #[rustler::nif(schedule = "DirtyIo", name="info_nif")]
 
-fn info<'a>(env: Env<'a>, resource: Term<'a>) ->
+fn info<'a>(env: Env<'a>, db_handle: Term<'a>) ->
     NifResult<Term<'a>> {
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let mut map = rustler::types::map::map_new(env);
     map = map.map_put(
         atoms::engine().encode(env),
-        resource.engine.encode(env)
+        db_handle.engine.encode(env)
     ).unwrap();
     map = map.map_put(
         atoms::path().encode(env),
-        resource.path.encode(env)
+        db_handle.path.encode(env)
     ).unwrap();
     Ok(map)
 
 }
+
+
+/// Returns the metadata associated with the resource
+#[rustler::nif(schedule = "DirtyIo", name="resource_nif")]
+
+fn resource<'a>(env: Env<'a>, db_handle: Term<'a>) ->
+    NifResult<Term<'a>> {
+    let db_handle: DbHandle = db_handle.decode()?;
+
+    let db =
+        match get_db(db_handle.db_id) {
+            Some(db) => db,
+            None => {
+                return Err(
+                    rustler::Error::Term(
+                        Box::new("invalid reference".to_string())
+                    )
+                )
+            }
+        };
+
+    // Finally create and return a Nif Resource with the id and metadata
+    let resource = ResourceArc::new(DbHandleResource {
+        db_instance: db
+    });
+    Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
+
+}
+
+
+
 
 
 /// Returns the result of running script
@@ -461,16 +498,16 @@ fn info<'a>(env: Env<'a>, resource: Term<'a>) ->
 
 fn run_script<'a>(
     env: Env<'a>,
-    resource: Term<'a>,
+    db_handle: Term<'a>,
     script: String,
     params: String,
     read_only: Term
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -515,16 +552,16 @@ fn run_script<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="run_script_json_nif")]
 fn run_script_json<'a>(
     env: Env<'a>,
-    resource: Term<'a>,
+    db_handle: Term<'a>,
     script: String,
     params: String,
     read_only: Term
     ) -> NifResult<Term<'a>>  {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -571,15 +608,15 @@ fn run_script_json<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="run_script_str_nif")]
 fn run_script_str<'a>(
     env: Env<'a>,
-    resource: Term<'a>,
+    db_handle: Term<'a>,
     script: String,
     params: String,
     read_only: Term
     ) -> NifResult<Term<'a>>  {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
-    let db = match get_db(resource.db_id) {
+    let db = match get_db(db_handle.db_id) {
         Some(db) => db,
         None => {
             return Err(
@@ -601,13 +638,13 @@ fn run_script_str<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="import_relations_nif")]
 
 fn import_relations<'a>(
-    env: Env<'a>, resource: Term<'a>, data: String
+    env: Env<'a>, db_handle: Term<'a>, data: String
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -630,13 +667,13 @@ fn import_relations<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_nif")]
 
 fn export_relations<'a>(
-    env: Env<'a>, resource: Term<'a>, relations: Vec<String>
+    env: Env<'a>, db_handle: Term<'a>, relations: Vec<String>
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -667,13 +704,13 @@ fn export_relations<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_json_nif")]
 
 fn export_relations_json<'a>(
-    env: Env<'a>, resource: Term<'a>, relations: Vec<String>
+    env: Env<'a>, db_handle: Term<'a>, relations: Vec<String>
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -703,13 +740,13 @@ fn export_relations_json<'a>(
 /// Backs up the database at path
 #[rustler::nif(schedule = "DirtyIo", name="backup_nif")]
 
-fn backup<'a>(env: Env<'a>, resource: Term<'a>, path: String
+fn backup<'a>(env: Env<'a>, db_handle: Term<'a>, path: String
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -732,13 +769,13 @@ fn backup<'a>(env: Env<'a>, resource: Term<'a>, path: String
 /// Backs up the database at path
 #[rustler::nif(schedule = "DirtyIo", name="restore_nif")]
 
-fn restore<'a>(env: Env<'a>, resource: Term<'a>, path: String
+fn restore<'a>(env: Env<'a>, db_handle: Term<'a>, path: String
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -763,15 +800,15 @@ fn restore<'a>(env: Env<'a>, resource: Term<'a>, path: String
 
 fn import_from_backup<'a>(
     env: Env<'a>,
-    resource: Term<'a>,
+    db_handle: Term<'a>,
     path: String,
     relations: Vec<String>
     ) -> NifResult<Term<'a>> {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -796,14 +833,14 @@ fn import_from_backup<'a>(
 
 fn register_callback<'a>(
     env: Env<'a>,
-    resource: Term<'a>,
+    db_handle: Term<'a>,
     rel: String) -> NifResult<Term<'a>>  {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     // Get db handle and fail is invalid
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(
@@ -853,14 +890,14 @@ fn register_callback<'a>(
 
 fn unregister_callback<'a>(
     env: Env<'a>,
-    resource: Term<'a>,
+    db_handle: Term<'a>,
     reg_id: u32) -> NifResult<Term<'a>>  {
 
-    let resource: DbHandle = resource.decode()?;
+    let db_handle: DbHandle = db_handle.decode()?;
 
     // Get db handle and fail is invalid
     let db =
-        match get_db(resource.db_id) {
+        match get_db(db_handle.db_id) {
             Some(db) => db,
             None => {
                 return Err(

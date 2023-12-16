@@ -281,6 +281,7 @@
 -export([explain/2]).
 -export([info/1]).
 -export([rows_to_maps/1]).
+-export([resource/1]).
 
 %% API: Operations
 -export([backup/2]).
@@ -392,6 +393,17 @@ when is_atom(Engine), is_binary(Path), is_map(Opts) ->
 
 close(DbHandle) when ?IS_DB_HANDLE(DbHandle) ->
     close_nif(DbHandle).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the CozoDB DBInstance as a NIF Resource.
+%% For testing and planned extensions, you SHALL NOT use this function.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resource(DbHandle :: db_handle()) -> {ok, reference()} | {error, any()}.
+
+resource(DbHandle) when ?IS_DB_HANDLE(DbHandle) ->
+    resource_nif(DbHandle).
 
 
 %% -----------------------------------------------------------------------------
@@ -1028,6 +1040,18 @@ init() ->
     {ok, db_handle()} | {error, Reason :: any()}.
 
 new_nif(_Engine, _Path, _Opts) ->
+    ?NIF_NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resource_nif(DbHandle :: db_handle()) ->
+    {ok, reference()} | {error, Reason :: any()}.
+
+resource_nif(_DbHandle) ->
     ?NIF_NOT_LOADED.
 
 

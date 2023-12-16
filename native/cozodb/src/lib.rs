@@ -32,7 +32,8 @@ use rustler::Encoder;
 use rustler::Env;
 use rustler::NifResult;
 use rustler::OwnedEnv;
-use rustler::ResourceArc;
+use rustler::NifMap;
+// use rustler::ResourceArc;
 use rustler::Term;
 use rustler::types::Pid;
 
@@ -107,8 +108,8 @@ rustler::init!("cozodb",
 
 
 /// Define NIF Resources using rustler::resource! macro
-fn on_load(env: Env, _: Term) -> bool {
-    rustler::resource!(DbResource, env);
+fn on_load(_env: Env, _: Term) -> bool {
+    // rustler::resource!(DbHandle, env);
     true
 }
 
@@ -121,8 +122,14 @@ fn on_load(env: Env, _: Term) -> bool {
 /// Struct used to globally manage database handles
 /// This is combined with lazy_static! macro to create a static variable
 /// containing this struct.
-/// We do this so that DbResource contains the Id as opposed to the DBinstance
-/// handle, required so that we can close a database.
+/// We do this so that DbHandle contains the Id as opposed to the DBinstance
+/// handle, required so that we can close a database from Erlang.
+///
+/// The most common alternative would have been to return the wrapped
+/// DBInstance as a NifResource, but unless we control all Erlang processes
+/// with a copy of the reference, the Rust DbInstance cannot be destroyed. As
+/// long as any process in Erlang has the reference, Rust will keep the
+/// DBInstance alive.
 struct Handles {
     current: AtomicI32, // thread safe counter
     dbs: Mutex<BTreeMap<i32, DbInstance>>, // mapping of Id -> DbInstance handle
@@ -208,7 +215,8 @@ lazy_static! {
 /// A NIF Resource representing the identifier for a DbInstance handle.
 /// We use HANDLES to associate identifiers with Cozo's DbInstance Handles
 /// so that we can implement close().
-struct DbResource {
+#[derive(NifMap)]
+struct DbHandle {
     db_id: i32,
     engine: String,
     path: String
@@ -397,20 +405,23 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
     dbs.insert(id, db);
 
     // Finally create and return a Nif Resource with the id and metadata
-    let resource = ResourceArc::new(DbResource {
+    let resource = DbHandle {
         db_id: id,
         engine: engine,
         path: path
-    });
-    Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
+    };
+    Ok((atoms::ok().encode(env), resource).encode(env))
 }
 
 
 /// Returns the result of running a script
 #[rustler::nif(schedule = "DirtyIo", name="close_nif")]
 
-fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
+fn close<'a>(env: Env<'a>, resource: Term<'a>) ->
     NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
+
     let db = {
         let mut dbs = HANDLES.dbs.lock().unwrap();
         dbs.remove(&resource.db_id)
@@ -427,8 +438,9 @@ fn close<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
 /// Returns the metadata associated with the resource
 #[rustler::nif(schedule = "DirtyIo", name="info_nif")]
 
-fn info<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
+fn info<'a>(env: Env<'a>, resource: Term<'a>) ->
     NifResult<Term<'a>> {
+    let resource: DbHandle = resource.decode()?;
 
     let mut map = rustler::types::map::map_new(env);
     map = map.map_put(
@@ -449,11 +461,13 @@ fn info<'a>(env: Env<'a>, resource: ResourceArc<DbResource>) ->
 
 fn run_script<'a>(
     env: Env<'a>,
-    resource: ResourceArc<DbResource>,
+    resource: Term<'a>,
     script: String,
     params: String,
     read_only: Term
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -501,11 +515,13 @@ fn run_script<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="run_script_json_nif")]
 fn run_script_json<'a>(
     env: Env<'a>,
-    resource: ResourceArc<DbResource>,
+    resource: Term<'a>,
     script: String,
     params: String,
     read_only: Term
     ) -> NifResult<Term<'a>>  {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -555,11 +571,14 @@ fn run_script_json<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="run_script_str_nif")]
 fn run_script_str<'a>(
     env: Env<'a>,
-    resource: ResourceArc<DbResource>,
+    resource: Term<'a>,
     script: String,
     params: String,
     read_only: Term
     ) -> NifResult<Term<'a>>  {
+
+    let resource: DbHandle = resource.decode()?;
+
     let db = match get_db(resource.db_id) {
         Some(db) => db,
         None => {
@@ -582,8 +601,10 @@ fn run_script_str<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="import_relations_nif")]
 
 fn import_relations<'a>(
-    env: Env<'a>, resource: ResourceArc<DbResource>, data: String
+    env: Env<'a>, resource: Term<'a>, data: String
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -609,8 +630,10 @@ fn import_relations<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_nif")]
 
 fn export_relations<'a>(
-    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<String>
+    env: Env<'a>, resource: Term<'a>, relations: Vec<String>
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -644,8 +667,10 @@ fn export_relations<'a>(
 #[rustler::nif(schedule = "DirtyIo", name="export_relations_json_nif")]
 
 fn export_relations_json<'a>(
-    env: Env<'a>, resource: ResourceArc<DbResource>, relations: Vec<String>
+    env: Env<'a>, resource: Term<'a>, relations: Vec<String>
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -678,8 +703,10 @@ fn export_relations_json<'a>(
 /// Backs up the database at path
 #[rustler::nif(schedule = "DirtyIo", name="backup_nif")]
 
-fn backup<'a>(env: Env<'a>, resource: ResourceArc<DbResource>, path: String
+fn backup<'a>(env: Env<'a>, resource: Term<'a>, path: String
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -705,8 +732,10 @@ fn backup<'a>(env: Env<'a>, resource: ResourceArc<DbResource>, path: String
 /// Backs up the database at path
 #[rustler::nif(schedule = "DirtyIo", name="restore_nif")]
 
-fn restore<'a>(env: Env<'a>, resource: ResourceArc<DbResource>, path: String
+fn restore<'a>(env: Env<'a>, resource: Term<'a>, path: String
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -734,10 +763,12 @@ fn restore<'a>(env: Env<'a>, resource: ResourceArc<DbResource>, path: String
 
 fn import_from_backup<'a>(
     env: Env<'a>,
-    resource: ResourceArc<DbResource>,
+    resource: Term<'a>,
     path: String,
     relations: Vec<String>
     ) -> NifResult<Term<'a>> {
+
+    let resource: DbHandle = resource.decode()?;
 
     let db =
         match get_db(resource.db_id) {
@@ -765,8 +796,10 @@ fn import_from_backup<'a>(
 
 fn register_callback<'a>(
     env: Env<'a>,
-    resource: ResourceArc<DbResource>,
+    resource: Term<'a>,
     rel: String) -> NifResult<Term<'a>>  {
+
+    let resource: DbHandle = resource.decode()?;
 
     // Get db handle and fail is invalid
     let db =
@@ -820,8 +853,10 @@ fn register_callback<'a>(
 
 fn unregister_callback<'a>(
     env: Env<'a>,
-    resource: ResourceArc<DbResource>,
+    resource: Term<'a>,
     reg_id: u32) -> NifResult<Term<'a>>  {
+
+    let resource: DbHandle = resource.decode()?;
 
     // Get db handle and fail is invalid
     let db =

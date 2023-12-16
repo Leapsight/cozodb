@@ -1,0 +1,5 @@
+%{
+  "cozodb": {:git, "https://github.com/leapsight/cozodb.git", "b120f7950b1c173bbb502fd21141d01025a14e3a", [branch: "master"]},
+  "telemetry": {:hex, :telemetry, "1.2.1", "68fdfe8d8f05a8428483a97d7aab2f268aaff24b49e0f599faa091f1d4e7f61c", [:rebar3], [], "hexpm", "dad9ce9d8effc621708f99eac538ef1cbe05d6a874dd741de2e689c47feafed5"},
+  "thoas": {:hex, :thoas, "1.2.0", "73b0546baff5008e6ed209558fd7b0606b035d96f9f3de24ef42879100e094d4", [:rebar3], [], "hexpm", "540c8cb7d9257f2ad0a14145dc23560f91acdca995f0ccba779eb33af5d859d1"},
+}

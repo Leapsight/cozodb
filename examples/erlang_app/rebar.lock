@@ -1,0 +1,21 @@
+{"1.2.0",
+[{<<"cozodb">>,
+  {git,"https://github.com/leapsight/cozodb.git",
+       {ref,"b120f7950b1c173bbb502fd21141d01025a14e3a"}},
+  0},
+ {<<"observer_cli">>,{pkg,<<"observer_cli">>,<<"1.7.4">>},1},
+ {<<"recon">>,{pkg,<<"recon">>,<<"2.5.4">>},1},
+ {<<"telemetry">>,{pkg,<<"telemetry">>,<<"1.2.1">>},1},
+ {<<"thoas">>,{pkg,<<"thoas">>,<<"1.0.0">>},1}]}.
+[
+{pkg_hash,[
+ {<<"observer_cli">>, <<"3C1BFB6D91BF68F6A3D15F46AE20DA0F7740D363EE5BC041191CE8722A6C4FAE">>},
+ {<<"recon">>, <<"05DD52A119EE4059FA9DAA1AB7CE81BC7A8161A2F12E9D42E9D551FFD2BA901C">>},
+ {<<"telemetry">>, <<"68FDFE8D8F05A8428483A97D7AAB2F268AAFF24B49E0F599FAA091F1D4E7F61C">>},
+ {<<"thoas">>, <<"567C03902920827A18A89F05B79A37B5BF93553154B883E0131801600CF02CE0">>}]},
+{pkg_hash_ext,[
+ {<<"observer_cli">>, <<"50DE6D95D814F447458BD5D72666A74624EDDB0EF98BDCEE61A0153AAE0865FF">>},
+ {<<"recon">>, <<"E9AB01AC7FC8572E41EB59385EFEB3FB0FF5BF02103816535BACAEDF327D0263">>},
+ {<<"telemetry">>, <<"DAD9CE9D8EFFC621708F99EAC538EF1CBE05D6A874DD741DE2E689C47FEAFED5">>},
+ {<<"thoas">>, <<"FC763185B932ECB32A554FB735EE03C3B6B1B31366077A2427D2A97F3BD26735">>}]}
+].

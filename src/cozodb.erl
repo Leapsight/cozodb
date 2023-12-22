@@ -138,7 +138,8 @@
 -type column_spec()         ::  undefined
                                 |#{
                                     type => column_type(),
-                                    nullable => boolean()
+                                    nullable => boolean(),
+                                    default => binary()
                                 }.
 -type column_name()         ::  binary().
 -type column_type()         ::  column_atomic_type() | column_composite_type().
@@ -260,6 +261,7 @@
 -export([open/3]).
 -export([run/2]).
 -export([run/3]).
+
 
 
 %% API: System Catalogue

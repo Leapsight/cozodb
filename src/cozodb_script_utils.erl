@@ -163,16 +163,21 @@ encode_relation_columns(Spec) when is_list(Spec) ->
                 [[$\s, Col, $:, $\s, Encoded] | Acc];
 
             F({Col, #{type := Type} = ColSpec}, Acc) when is_binary(Col) ->
-                Encoded0 = encode_column_type(Type),
-                Encoded =
-                    case maps:get(nullable, ColSpec, false) of
-                        true ->
-                            [Encoded0, $?];
-                        false ->
-                            Encoded0
+                Encoded = encode_column_type(Type),
+                DefaultNullable =
+                    case maps:get(default, ColSpec, undefined) of
+                        undefined ->
+                            case maps:get(nullable, ColSpec, false) of
+                                true ->
+                                    $?;
+                                false ->
+                                    <<>>
+                            end;
+                        Val ->
+                            [<<" default ">>, value_to_binary(Val)]
                     end,
 
-                [[$\s, Col, $:, $\s, Encoded] | Acc];
+                [[$\s, Col, $:, $\s, Encoded, DefaultNullable] | Acc];
 
             F(Col, Acc) when is_atom(Col); is_list(Col); is_binary(Col) ->
                 %% A column name without type, we coerse to tuple
@@ -189,6 +194,27 @@ encode_relation_columns(Spec) when is_list(Spec) ->
 
 encode_relation_columns(_Spec) ->
     error({badarg, "invalid specification"}).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+value_to_binary(Val) when is_atom(Val) ->
+    atom_to_binary(Val);
+
+value_to_binary(Val) when list(Val) ->
+    list_to_binary(Val);
+
+value_to_binary(Val) when float(Val) ->
+    float_to_binary(Val, [{decimals, 4}, compact]);
+
+value_to_binary(Val) when integer(Val) ->
+    integer_to_binary(Val);
+
+value_to_binary(Val) when binary(Val) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -409,7 +435,7 @@ when (
     <<
         (atom_to_binary(K))/binary,
         ": ",
-        (float_to_binary(N, [{decimals, 2}, compact]))/binary>>;
+        (float_to_binary(N, [{decimals, 4}, compact]))/binary>>;
 
 encode_index_entry(lsh, K, _)
 when K == target_threshold orelse

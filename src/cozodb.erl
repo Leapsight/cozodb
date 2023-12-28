@@ -801,7 +801,7 @@ indices(DbHandle, RelName) ->
     DbHandle :: db_handle(),
     RelName :: binary() | list(),
     Name :: binary() | list(),
-    Spec :: index_spec()) -> query_return().
+    Spec :: index_spec()) -> ok | {error, Reason :: any()} | no_return().
 
 create_index(DbHandle, RelName, Name, #{type := Type} = Spec0)
 when is_map(Spec0) ->
@@ -810,7 +810,12 @@ when is_map(Spec0) ->
     Query = iolist_to_binary([
         $:, $:, IndexOp, $\s, "create", $\s, RelName, $:, Name, $\s, Spec
     ]),
-    run(DbHandle, Query);
+    case run(DbHandle, Query) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            {error, format_reason(?FUNCTION_NAME, Reason)}
+    end;
 
 create_index(DbHandle, RelName, Name, Spec) ->
     ?ERROR(badarg, [DbHandle, RelName, Name, Spec], #{
@@ -825,14 +830,19 @@ create_index(DbHandle, RelName, Name, Spec) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec drop_index(DbHandle :: db_handle(), FQN :: binary() | list()) ->
-    query_return().
+    ok | {error, Reason :: any()} | no_return().
 
 drop_index(DbHandle, FQN) when is_list(FQN) ->
     drop_index(DbHandle, list_to_binary(FQN));
 
 drop_index(DbHandle, FQN) when is_binary(FQN) ->
     Cmd = <<"::index drop", $\s, FQN/binary>>,
-    run(DbHandle, Cmd).
+    case run(DbHandle, Cmd) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            {error, format_reason(?FUNCTION_NAME, Reason)}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -1260,6 +1270,9 @@ format_reason(Op, Reason) when is_binary(Reason) ->
         create_relation => [
             {match_suffix,
                 <<"conflicts with an existing one">>, already_exists}
+        ],
+        create_index => [
+            {match_suffix, <<"already exists">>, already_exists}
         ],
         remove_relation => [
             {match_prefix,

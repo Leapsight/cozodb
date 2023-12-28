@@ -938,12 +938,12 @@ index(Config) ->
     Path = ?config(db_path, Config),
     {ok, Db} = cozodb:open(Engine, Path),
     {ok, _} = cozodb:run(Db, ":create r {a => b}"),
-    {ok, _} = cozodb:create_index(Db, "r", "idx", #{
+    ok = cozodb:create_index(Db, "r", "idx", #{
         type => covering,
         fields => [b, a]
     }),
     {ok, _} = cozodb:indices(Db, "r"),
-    {ok, _} = cozodb:drop_index(Db, "r:idx"),
+    ok = cozodb:drop_index(Db, "r:idx"),
     cozodb:close(Db).
 
 %% -----------------------------------------------------------------------------
@@ -958,7 +958,7 @@ hnsw(Config) ->
         keys => [{k, string}],
         columns => [{v, {vector, 32, 128}}]
     }),
-    {ok, _} = cozodb:create_index(Db, "table_hnsw_fun", "my_hsnw_index", #{
+    ok = cozodb:create_index(Db, "table_hnsw_fun", "my_hsnw_index", #{
         type => hnsw,
         dim => 128,
         m => 50,
@@ -970,7 +970,8 @@ hnsw(Config) ->
         extend_candidates => false,
         keep_pruned_connections => false
     }),
-    {ok, _} = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
+
+    ok = cozodb:drop_index(Db, "table_hnsw_fun:my_hsnw_index"),
     cozodb:close(Db).
 
 %% -----------------------------------------------------------------------------
@@ -985,7 +986,7 @@ lsh(Config) ->
         keys => [{k, string}],
         columns => [{v, #{type => string, nullable => true}}]
     }),
-    {ok, _} = cozodb:create_index(Db, "table_lsh_fun", "my_lsh_index", #{
+    ok = cozodb:create_index(Db, "table_lsh_fun", "my_lsh_index", #{
         type => lsh,
         extractor => v,
         extract_filter => "!is_null(v)",
@@ -997,7 +998,7 @@ lsh(Config) ->
         false_positive_weight => 1.0,
         false_negative_weight => 1.0
     }),
-    {ok, _} = cozodb:drop_index(Db, "table_lsh_fun", "my_lsh_index"),
+    ok = cozodb:drop_index(Db, "table_lsh_fun", "my_lsh_index"),
     cozodb:close(Db).
 
 %% -----------------------------------------------------------------------------
@@ -1012,14 +1013,14 @@ fts1(Config) ->
         keys => [{k, string}],
         columns => [{v, #{type => string, nullable => true}}]
     }),
-    {ok, _} = cozodb:create_index(Db, "table_fts_fun", "my_fts_index", #{
+    ok = cozodb:create_index(Db, "table_fts_fun", "my_fts_index", #{
         type => fts,
         extractor => v,
         extract_filter => "!is_null(v)",
         tokenizer => simple,
         filters => [alphanumonly]
     }),
-    {ok, _} = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
+    ok = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
     cozodb:close(Db).
 
 
@@ -1031,14 +1032,14 @@ fts2(Config) ->
         keys => [{k, string}],
         columns => [{v, #{type => string, nullable => true}}]
     }),
-    {ok, _} = cozodb:create_index(Db, "table_fts_fun", "my_fts_index", #{
+    ok = cozodb:create_index(Db, "table_fts_fun", "my_fts_index", #{
         type => fts,
         extractor => v,
         extract_filter => "!is_null(v)",
         tokenizer => {ngram, 3, 3, false},
         filters => [lowercase, {stemmer, "english"}, {stopwords, "en"}]
     }),
-    {ok, _} = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
+    ok = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
     cozodb:close(Db).
 
 %% -----------------------------------------------------------------------------

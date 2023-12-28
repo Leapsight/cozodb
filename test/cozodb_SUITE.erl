@@ -202,7 +202,8 @@ all_cases() ->
         , index
         , hnsw
         , lsh
-        , fts
+        , fts1
+        , fts2
         , air_routes
     ].
 
@@ -1003,7 +1004,7 @@ lsh(Config) ->
 %%
 %% -----------------------------------------------------------------------------
 
-fts(Config) ->
+fts1(Config) ->
     Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
     {ok, Db} = cozodb:open(Engine, Path),
@@ -1017,6 +1018,25 @@ fts(Config) ->
         extract_filter => "!is_null(v)",
         tokenizer => simple,
         filters => [alphanumonly]
+    }),
+    {ok, _} = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
+    cozodb:close(Db).
+
+
+fts2(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ok = cozodb:create_relation(Db, "table_fts_fun", #{
+        keys => [{k, string}],
+        columns => [{v, #{type => string, nullable => true}}]
+    }),
+    {ok, _} = cozodb:create_index(Db, "table_fts_fun", "my_fts_index", #{
+        type => fts,
+        extractor => v,
+        extract_filter => "!is_null(v)",
+        tokenizer => {ngram, 3, 3, false},
+        filters => [lowercase, {stemmer, "english"}, {stopwords, "en"}]
     }),
     {ok, _} = cozodb:drop_index(Db, "table_fts_fun", "my_fts_index"),
     cozodb:close(Db).

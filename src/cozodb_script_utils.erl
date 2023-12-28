@@ -473,9 +473,11 @@ encode_index_tokenizer(ngram) ->
 encode_index_tokenizer({ngram, Min, Max, PrefixOnly})
 when is_integer(Min), is_integer(Max), is_boolean(PrefixOnly) ->
     <<
-        "Ngram(",
+        "NGram(",
         (integer_to_binary(Min))/binary,
+        $,,$\s,
         (integer_to_binary(Max))/binary,
+        $,,$\s,
         (atom_to_binary(PrefixOnly))/binary,
         ")"
     >>;

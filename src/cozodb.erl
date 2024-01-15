@@ -451,6 +451,14 @@ run(DbHandle, Script) when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
 run(DbHandle, Script, Opts) when is_list(Script) ->
     run(DbHandle, list_to_binary(Script), Opts);
 
+run(DbHandle, Query, #{sparql := true} = Opts) ->
+    case parse_sparql_nif(DbHandle, Query) of
+        {ok, Script} ->
+            run(DbHandle, Script, Opts);
+        {error, _} = Error ->
+            Error
+    end;
+
 run(DbHandle, Script, #{encoding := json} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
@@ -891,8 +899,10 @@ set_triggers(DbHandle, RelName, Spec) when is_list(RelName) ->
     set_triggers(DbHandle, list_to_binary(RelName), Spec);
 
 set_triggers(DbHandle, RelName, Spec) when is_binary(RelName), is_list(Spec) ->
-    Encoded = cozodb_script_utils:encode_triggers_spec(Spec),
-    Cmd = <<"::set_triggers", $\s, RelName/binary, $\n, Encoded/binary>>,
+    Triggers = cozodb_script_utils:encode_triggers_spec(Spec),
+    Cmd = iolist_to_binary([
+        <<"::set_triggers", $\s, RelName/binary, $\n>> | Triggers
+    ]),
     run(DbHandle, Cmd).
 
 
@@ -1136,6 +1146,18 @@ run_script_json_nif(_DbHandle, _Script, _Params, _ReadOnly) ->
     {ok, Json :: binary()}.
 
 run_script_str_nif(_DbHandle, _Script, _Params, _ReadOnly) ->
+    ?NIF_NOT_LOADED.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Calls native/cozodb/src/lib.rs::run_script
+%% @end
+%% -----------------------------------------------------------------------------
+-spec parse_sparql_nif(DbHandle :: db_handle(), Query :: binary()) ->
+    {ok, Script :: binary()}.
+
+parse_sparql_nif(_DbHandle, _Query) ->
     ?NIF_NOT_LOADED.
 
 

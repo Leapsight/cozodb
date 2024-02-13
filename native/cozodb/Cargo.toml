@@ -12,7 +12,7 @@ path = "src/lib.rs"
 crate-type = ["dylib"]
 
 [dependencies]
-rustler = {version = "0.30.0", features = ["nif_version_2_17"]}
+rustler = {version = "0.31.0", features = ["nif_version_2_17"]}
 # cozo = "0.7.6"
 cozo = { git = "https://github.com/aramallo/cozo.git", branch = "avoid_234" }
 ndarray = "0.15.6"
@@ -26,10 +26,19 @@ once_cell = "1.18.0"
 crossbeam = "0.8.2"
 num_cpus = "1.0"
 
+# Optional deps
+spargebra = {version = "0.2.8", optional = true}
+
 [features]
 default = [
     "cozo/storage-sqlite",
     "cozo/storage-rocksdb",
     "cozo/io-uring", # Enables io-uring option for the RocksDB storage
-    "cozo/graph-algo"
+    "cozo/graph-algo",
+    "sparql"
 ]
+storage-sqlite = ["cozo/storage-sqlite"]
+storage-rocksdb = ["cozo/storage-rocksdb"]
+io-uring = ["cozo/io-uring"]
+graph-algo = ["cozo/graph-algo"]
+sparql = ["dep:spargebra"]

@@ -7,6 +7,9 @@ Erlang NIF bindings for CozoDB using rustler.
 ## Requirements
 * Erlang OTP26 and/or Elixir (latest)
 * Rust
+* Linux
+  * `liburing-dev`
+  * `pkg-config`
 
 ## Installation
 

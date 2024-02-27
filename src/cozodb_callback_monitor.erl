@@ -148,7 +148,7 @@ handle_cast(_Msg, State) ->
     | {noreply, state(), {continue, term()}}
     | {stop, term(), state()}.
 
-handle_info({'DOWN', Ref, process, Pid, Reason}, #state{} = State) ->
+handle_info({'DOWN', _Ref, process, _Pid, _Reason}, #state{} = State) ->
     {noreply, State};
 
 handle_info(Event, State) ->

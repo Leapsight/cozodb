@@ -9,7 +9,7 @@ on:
 jobs:
 
   build_and_test:
-    name: Build and test on Erlang/OTP ${{matrix.otp}} and rebar3 ${{matrix.rebar3}}
+    name: Build and Test on Erlang/OTP ${{matrix.otp}} | Rebar3 ${{matrix.rebar3}} | Rust ${{matrix.rust}}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -32,21 +32,21 @@ jobs:
           shared-key: rustler
           save-if: false
 
-      - name: Install OTP ${{matrix.otp}} and rebar3 ${{matrix.rebar}}
+      - name: Install OTP Rebar3
         uses: erlef/setup-beam@v1
         with:
           otp-version: ${{matrix.otp}}
           # elixir-version: ${{matrix.elixir}}
           rebar3-version: ${{matrix.rebar3}}
 
-      - name: Install build dependency
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get -y install liburing-dev
+          sudo apt-get -y install liburing-dev pkg-config
 
       - name: Start epmd
         run: epmd -daemon
 
-      - name: Build and test cozodb
+      - name: Build and Test cozodb
         run: make test
 

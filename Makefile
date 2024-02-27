@@ -36,7 +36,7 @@ distclean: clean
 docs:
 	@$(REBAR3) edoc
 
-.PHONY: test
+.PHONY: eunit
 eunit:
 	@$(REBAR3) eunit
 
@@ -63,8 +63,7 @@ dyalizer:
 	@$(REBAR3) dyalizer
 
 .PHONY: test
-test:
-	@$(REBAR3) do eunit, ct, cover
+test: eunit ct
 
 .PHONY: release
 release: xref

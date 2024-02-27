@@ -1,0 +1,52 @@
+name: Common Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, "avoid_234"]
+    tags: ["*"]
+
+jobs:
+
+  build_and_test:
+    name: Build and test on Erlang/OTP ${{matrix.otp}} and rebar3 ${{matrix.rebar3}}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        otp: ['26.2.2']
+        # elixir: ['1.16.1']
+        rebar3: ['3.22.1']
+        rust: ['1.74.0']
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust ${{matrix.rust}} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{matrix.rust}}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rustler
+          save-if: false
+
+      - name: Install OTP ${{matrix.otp}} and rebar3 ${{matrix.rebar}}
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          # elixir-version: ${{matrix.elixir}}
+          rebar3-version: ${{matrix.rebar3}}
+
+      - name: Install build dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install liburing-dev
+
+      - name: Start epmd
+        run: epmd -daemon
+
+      - name: Build and test cozodb
+        run: make test
+

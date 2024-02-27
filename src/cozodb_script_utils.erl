@@ -204,16 +204,16 @@ encode_relation_columns(_Spec) ->
 value_to_binary(Val) when is_atom(Val) ->
     atom_to_binary(Val);
 
-value_to_binary(Val) when list(Val) ->
+value_to_binary(Val) when is_list(Val) ->
     list_to_binary(Val);
 
-value_to_binary(Val) when float(Val) ->
+value_to_binary(Val) when is_float(Val) ->
     float_to_binary(Val, [{decimals, 4}, compact]);
 
-value_to_binary(Val) when integer(Val) ->
+value_to_binary(Val) when is_integer(Val) ->
     integer_to_binary(Val);
 
-value_to_binary(Val) when binary(Val) ->
+value_to_binary(Val) when is_binary(Val) ->
     Val.
 
 

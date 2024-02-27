@@ -25,19 +25,10 @@ once_cell = "1.18.0"
 crossbeam = "0.8.2"
 num_cpus = "1.0"
 
-# Optional deps
-spargebra = {version = "0.2.8", optional = true}
-
 [features]
 default = [
     "cozo/storage-sqlite",
     "cozo/storage-rocksdb",
     "cozo/io-uring", # Enables io-uring option for the RocksDB storage
-    "cozo/graph-algo",
-    "sparql"
+    "cozo/graph-algo"
 ]
-storage-sqlite = ["cozo/storage-sqlite"]
-storage-rocksdb = ["cozo/storage-rocksdb"]
-io-uring = ["cozo/io-uring"]
-graph-algo = ["cozo/graph-algo"]
-sparql = ["dep:spargebra"]

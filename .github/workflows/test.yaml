@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo add-apt-repository ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get -y install liburing-dev pkg-config build-essential autoconf libssh-dev libncurses=dev
+          sudo apt-get -y install liburing-dev pkg-config build-essential autoconf libssh-dev libncurses-dev
 
       - name: Start epmd
         run: epmd -daemon

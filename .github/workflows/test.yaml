@@ -10,13 +10,13 @@ jobs:
 
   build_and_test:
     name: Build and Test on Erlang/OTP ${{matrix.otp}} | Rebar3 ${{matrix.rebar3}} | Rust ${{matrix.rust}}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         otp: ['26.2.2']
         # elixir: ['1.16.1']
         rebar3: ['3.22.1']
-        rust: ['1.74.0']
+        rust: ['1.76.0']
     steps:
 
       - name: Checkout
@@ -41,9 +41,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo add-apt-repository ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get -y install liburing-dev pkg-config build-essential autoconf libssh-dev libncurses-dev
+          sudo apt-get -y install liburing-dev libssh-dev
 
       - name: Start epmd
         run: epmd -daemon

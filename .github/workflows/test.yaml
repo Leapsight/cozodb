@@ -41,8 +41,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get -y install liburing-dev libssh-dev
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends build-essential cmake liblz4-dev libncurses-dev libsnappy-dev libssl-dev liburing-dev liburing2 openssl pkg-config bash curl git tar
 
       - name: Start epmd
         run: epmd -daemon

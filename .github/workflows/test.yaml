@@ -22,6 +22,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends build-essential cmake liblz4-dev libncurses-dev libsnappy-dev libssl-dev liburing-dev liburing2 openssl pkg-config bash curl git tar
+
       - name: Install Rust ${{matrix.rust}} toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -38,11 +43,6 @@ jobs:
           otp-version: ${{matrix.otp}}
           # elixir-version: ${{matrix.elixir}}
           rebar3-version: ${{matrix.rebar3}}
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends build-essential cmake liblz4-dev libncurses-dev libsnappy-dev libssl-dev liburing-dev liburing2 openssl pkg-config bash curl git tar
 
       - name: Start epmd
         run: epmd -daemon

@@ -1,5 +1,5 @@
 {application, cozodb,
- [{description, "Erlang NIF wrapper for CozoDB."},
+ [{description, "Erlang NIF wrapper for CozoDB using Rustler."},
   {vsn, "0.1.0"},
   {registered, []},
   {mod, {cozodb_app, []}},
@@ -11,5 +11,5 @@
   {modules, []},
 
   {licenses, ["Apache 2.0"]},
-  {links, []}
+  {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}
  ]}.

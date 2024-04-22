@@ -3,7 +3,7 @@ cozodb
 
 Erlang/BEAM NIF bindings for CozoDB using Rustler.
 
-CozoDB is a FOSS embeddable, transactional, relational-graph-vector database, with time travelling capability, perfect as the long-term memory for LLMs and AI.
+CozoDB is a FOSS embeddable, transactional, relational-graph-vector database, wiht a Datalog query engine and time travelling capability, perfect as the long-term memory for LLMs and AI.
 
 ## Installation
 

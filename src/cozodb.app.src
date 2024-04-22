@@ -11,5 +11,5 @@
   {modules, []},
 
   {licenses, ["Apache 2.0"]},
-  {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}]}.
+  {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}
  ]}.

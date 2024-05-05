@@ -22,6 +22,8 @@
 -export([encode_relation_spec/1]).
 -export([encode_index_spec/1]).
 -export([encode_triggers_spec/1]).
+-export([to_quoted_string/1]).
+-export([to_quoted_string/2]).
 
 
 
@@ -60,7 +62,6 @@ encode_relation_spec(#{keys := Keys, columns := Cols}) ->
     [${, EncodedKeys, EncodedCols, $\s, $}];
 
 encode_relation_spec(_) ->
-    %% Any other value
     error({badarg, "invalid specification"}).
 
 
@@ -127,8 +128,56 @@ encode_triggers_spec(Specs) ->
     lists:join("\n", L).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+to_quoted_string(Term) ->
+    to_quoted_string(Term, single).
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+to_quoted_string(undefined, _) ->
+    <<"Null">>;
 
+to_quoted_string(nil, _) ->
+    <<"Null">>;
+
+to_quoted_string(null, _) ->
+    <<"Null">>;
+
+to_quoted_string(Val, _) when is_integer(Val) ->
+    integer_to_binary(Val);
+
+to_quoted_string(Val, _) when is_float(Val) ->
+    list_to_binary(io_lib_format:fwrite_g(Val));
+
+to_quoted_string({var, X}, _) when is_binary(X) ->
+    X;
+
+to_quoted_string(Val, single) when is_binary(Val) ->
+    <<"'", Val/binary, "'">>;
+
+to_quoted_string(Val, raw) when is_binary(Val) ->
+    <<"___\"", Val/binary, "\"___">>;
+
+to_quoted_string(Val, single) when is_atom(Val) ->
+    <<"'", (atom_to_binary(Val, utf8))/binary, "'">>;
+
+to_quoted_string(Val, raw) when is_atom(Val) ->
+    <<"___\"", (atom_to_binary(Val, utf8))/binary, "\"___">>;
+
+to_quoted_string(Values, Type) when is_list(Values) ->
+    iolist_to_binary([
+        <<"[">>,
+        lists:join(
+            <<", ">>,
+            lists:map(fun (V) -> to_quoted_string(V, Type) end, Values)
+        ),
+        <<"]">>
+    ]).
 
 
 %% =============================================================================
@@ -173,6 +222,8 @@ encode_relation_columns(Spec) when is_list(Spec) ->
                                 false ->
                                     <<>>
                             end;
+                        Val when Type == string; Type == uuid ->
+                            to_quoted_string(Val);
                         Val ->
                             [<<" default ">>, value_to_binary(Val)]
                     end,
@@ -201,6 +252,9 @@ encode_relation_columns(_Spec) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+value_to_binary(Val) when Val == null; Val == nil; Val == undefined ->
+    <<"Null">>;
+
 value_to_binary(Val) when is_atom(Val) ->
     atom_to_binary(Val);
 
@@ -565,6 +619,56 @@ encode_trigger_spec({on_remove, Script}) ->
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+
+to_quoted_string_test() ->
+    ?assertEqual(<<"Null">>, to_quoted_string(undefined, single)),
+    ?assertEqual(<<"Null">>, to_quoted_string(undefined, raw)),
+    ?assertEqual(<<"Null">>, to_quoted_string(nil, raw)),
+    ?assertEqual(<<"Null">>, to_quoted_string(nil, raw)),
+    ?assertEqual(<<"Null">>, to_quoted_string(null, raw)),
+    ?assertEqual(<<"Null">>, to_quoted_string(null, raw)),
+    ?assertEqual(<<"'a'">>, to_quoted_string(a, single)),
+    ?assertEqual(<<"___\"a\"___">>, to_quoted_string(a, raw)),
+
+    ?assertEqual(
+        <<"0.046598684042692184">>,
+        to_quoted_string(0.046598684042692184)
+    ),
+    ?assertEqual(<<"1000">>, to_quoted_string(1_000)),
+
+    ?assertEqual(<<"'foo'">>, to_quoted_string(<<"foo">>, single)),
+    ?assertEqual(<<"___\"foo\"___">>, to_quoted_string(<<"foo">>, raw)),
+
+    ?assertEqual(<<"'foo'">>, to_quoted_string(<<"foo">>, single)),
+    ?assertEqual(<<"___\"foo\"___">>, to_quoted_string(<<"foo">>, raw)),
+
+    ?assertEqual(
+        <<"___\"'\"foo\"'\"___">>,
+        to_quoted_string(<<"'\"foo\"'">>, raw)
+    ),
+
+
+    ?assertEqual(
+        <<"[Null, Null, Null, 'a', 'foo', 0.046598684042692184, 1000]">>,
+        to_quoted_string(
+            [
+                undefined, nil, null, a, <<"foo">>, 0.046598684042692184, 1_000
+            ],
+            single
+        )
+    ),
+
+    ?assertEqual(
+        <<"[Null, Null, Null, ___\"a\"___, ___\"foo\"___, 0.046598684042692184, 1000]">>,
+        to_quoted_string(
+            [
+                undefined, nil, null, a, <<"foo">>, 0.046598684042692184, 1_000
+            ],
+            raw
+        )
+    ),
+    ok.
 
 encode_relation_columns_test() ->
     ?assertError(

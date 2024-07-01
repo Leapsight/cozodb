@@ -228,6 +228,7 @@
 -type query_result()        ::  #{
                                     headers := [column_name()],
                                     rows := [row()],
+                                    count := integer(),
                                     next => [row()] | null,
                                     took => float() % secs
                                 }.

@@ -67,6 +67,7 @@ mod atoms {
         error,
         null,
         json,
+        count,
         cozo_named_rows,
         engine,
         path,
@@ -241,6 +242,7 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
                 .map(|inner_vec|
                     inner_vec.into_iter().map(DataValueWrapper).collect())
                 .collect();
+        let count = rows.len();
         let next = match &self.0.next {
             Some(more_ref) => {
                 // Dereference `more` before encoding
@@ -254,7 +256,9 @@ impl<'a> Encoder for NamedRowsWrapper<'_> {
         let mut map = rustler::types::map::map_new(env);
         map = map.map_put(atoms::headers(), headers).unwrap();
         map = map.map_put(atoms::rows(), rows).unwrap();
-        map.map_put(atoms::next(), next).unwrap()
+        map = map.map_put(atoms::next(), next).unwrap();
+        map = map.map_put(atoms::count(), count.encode(env)).unwrap();
+        map
     }
 }
 

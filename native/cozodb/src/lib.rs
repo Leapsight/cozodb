@@ -35,7 +35,7 @@ use rustler::OwnedEnv;
 use rustler::NifMap;
 use rustler::ResourceArc;
 use rustler::Term;
-use rustler::types::Pid;
+use rustler::types::LocalPid;
 
 // Used for global state
 use lazy_static::lazy_static;
@@ -142,7 +142,7 @@ struct Handles {
 struct Registration {
     receiver: Receiver<(CallbackOp, NamedRows, NamedRows)>,
     relname: String,
-    pid: Pid
+    pid: LocalPid
 }
 
 // id -> (channel, relname, pid)
@@ -993,7 +993,7 @@ fn handle_event(
     new_rows: NamedRows,
     old_rows: NamedRows,
     reg_id: u32,
-    pid: Pid) {
+    pid: LocalPid) {
     let _ = OwnedEnv::new().send_and_clear(&pid, |env| {
         let result: NifResult<Term> = (|| {
             let reg_id = reg_id.encode(env);

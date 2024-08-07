@@ -424,7 +424,7 @@ checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
 [[package]]
 name = "cozo"
 version = "0.7.6"
-source = "git+https://github.com/aramallo/cozo.git?branch=avoid-234-stack-graphs#dde4600e8c9b97fbc926120f6130368693db4904"
+source = "git+https://github.com/aramallo/cozo.git?tag=augoor-1.4#1259d9e25ee4cc8d26cc7236305729bd57cbfd68"
 dependencies = [
  "aho-corasick",
  "approx",
@@ -489,7 +489,7 @@ dependencies = [
 [[package]]
 name = "cozorocks"
 version = "0.1.7"
-source = "git+https://github.com/aramallo/cozo.git?branch=avoid-234-stack-graphs#e2709ac08bd938101fda8c7f0ece2cd9a522842c"
+source = "git+https://github.com/aramallo/cozo.git?tag=augoor-1.4#1259d9e25ee4cc8d26cc7236305729bd57cbfd68"
 dependencies = [
  "cc",
  "cxx",

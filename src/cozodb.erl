@@ -439,7 +439,8 @@ run(DbHandle, Script) when is_list(Script) ->
 run(DbHandle, Script) when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
     Params = map_to_json(#{}),
     ReadOnly = false,
-    run_script_nif(DbHandle, Script, Params, ReadOnly).
+    Meta = #{script => Script, db_handle => DbHandle, options => #{}},
+    run_script_span(DbHandle, Script, Params, ReadOnly, Meta).
 
 
 %% -----------------------------------------------------------------------------
@@ -476,12 +477,8 @@ run(DbHandle, Script, Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts) ->
     Params = map_to_json(maps:get(params, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
-    %% telemetry:execute(
-    %% [cozodb, query, start],
-    %% #{system_time => erlang:system_time(), script => Script}
-    %% ),
-    run_script_nif(DbHandle, Script, Params, ReadOnly).
-
+    Meta = #{script => Script, db_handle => DbHandle, options => Opts},
+    run_script_span(DbHandle, Script, Params, ReadOnly, Meta).
 
 
 %% -----------------------------------------------------------------------------
@@ -1101,6 +1098,16 @@ info_nif(_DbHandle) ->
 close_nif(_DbHandle) ->
     ?NIF_NOT_LOADED.
 
+%% @private
+run_script_span(DbHandle, Script, Params, ReadOnly, Meta) ->
+    telemetry:span([cozodb, run], Meta, fun() ->
+        case run_script_nif(DbHandle, Script, Params, ReadOnly) of
+            {ok, _} = OK ->
+                {OK, Meta};
+            {error, Reason} = Error ->
+                {Error, Meta#{error => Reason}}
+        end
+    end).
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -1389,6 +1396,8 @@ map_to_json(Term) when is_map(Term) ->
 
 json_encoder() ->
     application:get_env(?APP, json_parser, thoas).
+
+
 
 
 %% =============================================================================

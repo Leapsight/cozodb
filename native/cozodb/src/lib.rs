@@ -30,9 +30,11 @@ use std::time::Instant;
 // Rustler
 use rustler::Encoder;
 use rustler::Env;
+use rustler::ListIterator;
+use rustler::MapIterator;
+use rustler::NifMap;
 use rustler::NifResult;
 use rustler::OwnedEnv;
-use rustler::NifMap;
 use rustler::ResourceArc;
 use rustler::Term;
 use rustler::types::LocalPid;
@@ -325,6 +327,87 @@ impl<'a> Encoder for DataValueWrapper {
     }
 }
 
+// DataValue does not provide a decode function so we create a new trait and
+// implement it. This is used to convert the options Erlang map to a BTreeMap
+// expected by run_script
+trait Decoder<'a> {
+    fn decode(term: Term<'a>) -> NifResult<Self>
+    where
+        Self: Sized;
+}
+
+impl<'a> DataValueWrapper {
+    pub fn decode(term: Term<'a>) -> NifResult<Self> {
+        if term == atoms::null().encode(term.get_env()) {
+            return Ok(DataValueWrapper(DataValue::Null));
+        }
+
+        if term == atoms::true_().encode(term.get_env()) {
+            return Ok(DataValueWrapper(DataValue::Bool(true)));
+        }
+
+        if term == atoms::false_().encode(term.get_env()) {
+            return Ok(DataValueWrapper(DataValue::Bool(false)));
+        }
+
+        if let Ok(num) = term.decode::<i64>() {
+            return Ok(DataValueWrapper(DataValue::Num(cozo::Num::Int(num))));
+        } else if let Ok(num) = term.decode::<f64>() {
+            return Ok(DataValueWrapper(DataValue::Num(cozo::Num::Float(num))));
+        }
+
+        // Handle lists
+        if let Ok(list_iterator) = term.decode::<ListIterator>() {
+            // Collect the list into a vector to process multiple times
+            let list_terms: Vec<Term<'a>> = list_iterator.collect();
+
+            let is_list_of_integers =
+                list_terms.iter().all(|t| t.decode::<i64>().is_ok());
+
+            if is_list_of_integers {
+                // Decode as a list of integers
+                let decoded_list: NifResult<Vec<DataValue>> =
+                    list_terms.iter()
+                    .map(|term| {
+                        let num = term.decode::<i64>()?;
+                        Ok(DataValue::Num(cozo::Num::Int(num)))
+                    })
+                    .collect();
+                return Ok(DataValueWrapper(DataValue::List(decoded_list?)));
+            }
+
+            let decoded_list: NifResult<Vec<DataValue>> =
+                list_terms.iter()
+                .map(|term| DataValueWrapper::decode(*term).map(
+                    |wrapper| wrapper.0)
+                )
+                .collect();
+            return Ok(DataValueWrapper(DataValue::List(decoded_list?)));
+        }
+
+        if let Ok(string) = term.decode::<String>() {
+            return Ok(DataValueWrapper(DataValue::Str(string.into())));
+        }
+
+        // Handle JSON
+        if let Ok((json_atom, json_str)) = term.decode::<(Term, String)>() {
+            if json_atom == atoms::json().encode(term.get_env()) {
+                if let Ok(json_value) = serde_json::from_str(&json_str) {
+                    return Ok(DataValueWrapper(DataValue::Json(json_value)));
+                }
+            }
+        }
+
+        // TODO Handle validity
+
+
+        // Default case for unrecognized or unsupported terms
+        Err(rustler::Error::Term(
+            Box::new("Unsupported Erlang term".to_string())
+        ))
+    }
+}
+
 /// Wrapper required to serialise Cozo's Num value as Erlang Term
 struct NumWrapper(Num);
 
@@ -424,7 +507,6 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
 }
 
 
-/// Returns the result of running a script
 #[rustler::nif(schedule = "DirtyIo", name="close_nif")]
 
 fn close<'a>(env: Env<'a>, db_handle: Term<'a>) ->
@@ -504,7 +586,7 @@ fn run_script<'a>(
     env: Env<'a>,
     db_handle: Term<'a>,
     script: String,
-    params: String,
+    params: Term,
     read_only: Term
     ) -> NifResult<Term<'a>> {
 
@@ -529,17 +611,12 @@ fn run_script<'a>(
             ScriptMutability::Mutable
         };
 
-    let params_json =
-        match params_to_btree(&params) {
-            Ok(value) => value,
-            Err(err) => return Err(rustler::Error::Term(
-                Box::new(err.to_string())
-            ))
-        };
+    // Convert the Erlang map to a BTreeMap using the helper function
+    let btree = convert_to_btreemap(params)?;
 
     let start = Instant::now();
 
-    match db.run_script(&script, params_json, read_only) {
+    match db.run_script(&script, btree, read_only) {
         Ok(named_rows) => {
             let took = start.elapsed().as_secs_f64();
             let mut map = NamedRowsWrapper(&named_rows).encode(env);
@@ -937,6 +1014,22 @@ fn get_db(db_id: i32) -> Option<DbInstance> {
     dbs.get(&db_id).cloned()
 }
 
+
+// Helper function to convert Erlang map to BTreeMap
+fn convert_to_btreemap(map_term: Term) ->
+NifResult<BTreeMap<String, DataValue>> {
+    let map_iterator: MapIterator = map_term.decode()?;
+
+    let mut btree: BTreeMap<String, DataValue> = BTreeMap::new();
+
+    for (key, value) in map_iterator {
+        let key_str: String = key.decode()?;
+        let data_value = DataValueWrapper::decode(value)?.0;  // Use the decode function here
+        btree.insert(key_str, data_value);
+    }
+
+    Ok(btree)
+}
 
 fn params_to_btree(params: &String) ->
     Result<BTreeMap<String, DataValue>, &'static str> {

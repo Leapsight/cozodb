@@ -426,7 +426,8 @@ info(DbHandle) when ?IS_DB_HANDLE(DbHandle) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec run(DbHandle :: db_handle(), Script :: script()) -> query_return().
+-spec run(DbHandle :: db_handle(), Script :: script()) ->
+    query_return() | no_return().
 
 run(DbHandle, Script) when Script == ""; Script == <<>> ->
     ?ERROR(badarg, [DbHandle, Script], #{
@@ -437,10 +438,9 @@ run(DbHandle, Script) when is_list(Script) ->
     run(DbHandle, list_to_binary(Script));
 
 run(DbHandle, Script) when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(#{}),
     ReadOnly = false,
     Meta = #{script => Script, db_handle => DbHandle, options => #{}},
-    run_script_span(DbHandle, Script, Params, ReadOnly, Meta).
+    run_script_span(DbHandle, Script, #{}, ReadOnly, Meta).
 
 
 %% -----------------------------------------------------------------------------
@@ -475,7 +475,7 @@ when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
 
 run(DbHandle, Script, Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts) ->
-    Params = map_to_json(maps:get(params, Opts, #{})),
+    Params = maps:get(params, Opts, #{}),
     ReadOnly = maps:get(read_only, Opts, false),
     Meta = #{script => Script, db_handle => DbHandle, options => Opts},
     run_script_span(DbHandle, Script, Params, ReadOnly, Meta).
@@ -664,7 +664,7 @@ create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) -
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -684,7 +684,7 @@ remove_relation(DbHandle, RelNames) ->
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -820,7 +820,7 @@ when is_map(Spec0) ->
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end;
 
 create_index(DbHandle, RelName, Name, Spec) ->
@@ -847,7 +847,7 @@ drop_index(DbHandle, FQN) when is_binary(FQN) ->
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -1098,14 +1098,17 @@ info_nif(_DbHandle) ->
 close_nif(_DbHandle) ->
     ?NIF_NOT_LOADED.
 
+
 %% @private
 run_script_span(DbHandle, Script, Params, ReadOnly, Meta) ->
     telemetry:span([cozodb, run], Meta, fun() ->
         case run_script_nif(DbHandle, Script, Params, ReadOnly) of
             {ok, _} = OK ->
                 {OK, Meta};
-            {error, Reason} = Error ->
-                {Error, Meta#{error => Reason}}
+            {error, Reason} ->
+                Formatted = format_error(Reason),
+                Error = {error, Formatted},
+                {Error, Meta#{error => Formatted}}
         end
     end).
 
@@ -1117,9 +1120,9 @@ run_script_span(DbHandle, Script, Params, ReadOnly, Meta) ->
 -spec run_script_nif(
     DbHandle :: db_handle(),
     Script :: binary(),
-    Params :: binary(),
+    Params :: map(),
     ReadOnly :: boolean()) ->
-    {ok, Json :: binary()}.
+    query_return().
 
 run_script_nif(_DbHandle, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
@@ -1294,7 +1297,19 @@ when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-format_reason(Op, Reason) when is_binary(Reason) ->
+format_error(<<"Running query is killed before completion">>) ->
+    timeout;
+
+format_error(Reason) ->
+    Reason.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+format_error(Op, Reason) when is_binary(Reason) ->
     %% #{FUNCTION_NAME => [{MatchRule, Cozo string pattern, Return]}
     AllRules = #{
         create_relation => [
@@ -1334,7 +1349,7 @@ format_reason(Op, Reason) when is_binary(Reason) ->
             Reason
     end;
 
-format_reason(_, Reason) ->
+format_error(_, Reason) ->
     Reason.
 
 

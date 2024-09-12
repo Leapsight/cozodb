@@ -182,6 +182,7 @@ end_per_testcase(_TestCase, Config) ->
 groups() ->
     [
         {mem, all_cases()},
+        {mem, param_cases()},
         {rocksdb, all_cases()},
         {sqlite, all_cases()}
     ].
@@ -207,6 +208,18 @@ all_cases() ->
         , air_routes
     ].
 
+param_cases() ->
+    [
+        param_null,
+        param_boolean,
+        param_integer,
+        param_float,
+        param_string,
+        param_json,
+        param_integer_list,
+        param_mixed_list,
+        param_mixed_list_atoms
+    ].
 
 %% -----------------------------------------------------------------------------
 %% Function: all() -> GroupsAndTestCases | {skip,Reason}
@@ -1060,3 +1073,158 @@ cozo_spawn(Counter) ->
   Run = fun(Db) -> spawn(cozodb, run, [Db, "?[] <- [[1, 2, 3]]"]) end,
   [ Run(Db) || Db <- Dbs ],
   [ cozodb:close(Db) || Db <- Dbs ].
+
+
+
+
+
+%% =============================================================================
+%% PARAMS
+%% =============================================================================
+
+param_null(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [null] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => null}})
+    ).
+
+param_boolean(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [true] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => true}})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [false] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => false}})
+    ).
+
+param_integer(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [1] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => 1}})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [0] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => 0}})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [-1] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => -1}})
+    ).
+
+param_float(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [1.0] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => 1.0}})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [0.0] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => 0.0}})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [-1.0] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => -1.0}})
+    ).
+
+param_string(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [<<"Hello World">>] ]}},
+        cozodb:run(
+            Db,
+            <<"?[x] := x = $a">>,
+            #{parameters => #{<<"a">> => <<"Hello World">>}}
+        )
+    ).
+
+param_json(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    Json = thoas:encode(#{foo => bar}),
+    ?assertMatch(
+        {ok, #{rows := [ [Json] ]}},
+        cozodb:run(
+            Db,
+            <<"?[x] := x = $a">>,
+            #{parameters => #{<<"a">> => Json}}
+        )
+    ).
+
+param_integer_list(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [[1, 2, 3]] ]}},
+        cozodb:run(
+            Db,
+            <<"?[x] := x = $a">>,
+            #{parameters => #{<<"a">> => [1, 2, 3]}}
+        )
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [1, 2, 3] ]}},
+        cozodb:run(
+            Db,
+            <<"
+                aux[x, y, z] <- $a
+                ?[x, y, z] := aux[x, y, z]
+            ">>,
+            #{parameters => #{<<"a">> => [ [1, 2, 3] ]}}
+        )
+    ).
+
+param_mixed_list(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [1, 2.0, <<"Hello World">>, null, [1, 2, 3]] ]}},
+        cozodb:run(
+            Db,
+            <<"
+                aux[x, y, z, q, r] <- $a
+                ?[x, y, z, q, r] := aux[x, y, z, q, r]
+            ">>,
+            #{parameters =>
+                #{<<"a">> => [ [1, 2.0, <<"Hello World">>, null, [1, 2, 3]] ]}
+            }
+        )
+    ).
+
+
+param_mixed_list_atoms(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [1, 2.0, <<"hello">>, null, [1, 2, 3]] ]}},
+        cozodb:run(
+            Db,
+            <<"
+                aux[x, y, z, q, r] <- $a
+                ?[x, y, z, q, r] := aux[x, y, z, q, r]
+            ">>,
+            #{parameters =>
+                %% param a as atom
+                %% 3rd column value as atom
+                #{a => [ [1, 2.0, hello, null, [1, 2, 3]] ]}
+            }
+        )
+    ).
+

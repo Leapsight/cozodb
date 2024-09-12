@@ -220,7 +220,7 @@
 -type query_opts()          ::  #{
                                     encoding => json | undefined,
                                     read_only => boolean(),
-                                    params => map()
+                                    parameters => map()
                                 }.
 -type query_return()        ::  {ok, query_result()}
                                 | {ok, Json :: binary()}
@@ -426,7 +426,8 @@ info(DbHandle) when ?IS_DB_HANDLE(DbHandle) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec run(DbHandle :: db_handle(), Script :: script()) -> query_return().
+-spec run(DbHandle :: db_handle(), Script :: script()) ->
+    query_return() | no_return().
 
 run(DbHandle, Script) when Script == ""; Script == <<>> ->
     ?ERROR(badarg, [DbHandle, Script], #{
@@ -437,9 +438,9 @@ run(DbHandle, Script) when is_list(Script) ->
     run(DbHandle, list_to_binary(Script));
 
 run(DbHandle, Script) when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(#{}),
     ReadOnly = false,
-    run_script_nif(DbHandle, Script, Params, ReadOnly).
+    Meta = #{script => Script, db_handle => DbHandle, options => #{}},
+    run_script_span(DbHandle, Script, #{}, ReadOnly, Meta).
 
 
 %% -----------------------------------------------------------------------------
@@ -462,26 +463,22 @@ run(DbHandle, Query, #{sparql := true} = Opts) ->
 
 run(DbHandle, Script, #{encoding := json} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(maps:get(params, Opts, #{})),
+    Params = map_to_json(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_json_nif(DbHandle, Script, Params, ReadOnly);
 
 run(DbHandle, Script, #{encoding := map} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(maps:get(params, Opts, #{})),
+    Params = map_to_json(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_str_nif(DbHandle, Script, Params, ReadOnly);
 
 run(DbHandle, Script, Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts) ->
-    Params = map_to_json(maps:get(params, Opts, #{})),
+    Params = maps:get(parameters, Opts, #{}),
     ReadOnly = maps:get(read_only, Opts, false),
-    %% telemetry:execute(
-    %% [cozodb, query, start],
-    %% #{system_time => erlang:system_time(), script => Script}
-    %% ),
-    run_script_nif(DbHandle, Script, Params, ReadOnly).
-
+    Meta = #{script => Script, db_handle => DbHandle, options => Opts},
+    run_script_span(DbHandle, Script, Params, ReadOnly, Meta).
 
 
 %% -----------------------------------------------------------------------------
@@ -667,7 +664,7 @@ create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) -
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -687,7 +684,7 @@ remove_relation(DbHandle, RelNames) ->
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -823,7 +820,7 @@ when is_map(Spec0) ->
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end;
 
 create_index(DbHandle, RelName, Name, Spec) ->
@@ -850,7 +847,7 @@ drop_index(DbHandle, FQN) when is_binary(FQN) ->
         {ok, _} ->
             ok;
         {error, Reason} ->
-            {error, format_reason(?FUNCTION_NAME, Reason)}
+            {error, format_error(?FUNCTION_NAME, Reason)}
     end.
 
 
@@ -1102,6 +1099,19 @@ close_nif(_DbHandle) ->
     ?NIF_NOT_LOADED.
 
 
+%% @private
+run_script_span(DbHandle, Script, Params, ReadOnly, Meta) ->
+    telemetry:span([cozodb, run], Meta, fun() ->
+        case run_script_nif(DbHandle, Script, Params, ReadOnly) of
+            {ok, _} = OK ->
+                {OK, Meta};
+            {error, Reason} ->
+                Formatted = format_error(Reason),
+                Error = {error, Formatted},
+                {Error, Meta#{error => Formatted}}
+        end
+    end).
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc Calls native/cozodb/src/lib.rs::run_script
@@ -1110,9 +1120,9 @@ close_nif(_DbHandle) ->
 -spec run_script_nif(
     DbHandle :: db_handle(),
     Script :: binary(),
-    Params :: binary(),
+    Params :: map(),
     ReadOnly :: boolean()) ->
-    {ok, Json :: binary()}.
+    query_return().
 
 run_script_nif(_DbHandle, _Script, _Params, _ReadOnly) ->
     ?NIF_NOT_LOADED.
@@ -1287,7 +1297,19 @@ when is_binary(Engine), is_binary(Path), is_binary(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-format_reason(Op, Reason) when is_binary(Reason) ->
+format_error(<<"Running query is killed before completion">>) ->
+    timeout;
+
+format_error(Reason) ->
+    Reason.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+format_error(Op, Reason) when is_binary(Reason) ->
     %% #{FUNCTION_NAME => [{MatchRule, Cozo string pattern, Return]}
     AllRules = #{
         create_relation => [
@@ -1327,7 +1349,7 @@ format_reason(Op, Reason) when is_binary(Reason) ->
             Reason
     end;
 
-format_reason(_, Reason) ->
+format_error(_, Reason) ->
     Reason.
 
 
@@ -1389,6 +1411,8 @@ map_to_json(Term) when is_map(Term) ->
 
 json_encoder() ->
     application:get_env(?APP, json_parser, thoas).
+
+
 
 
 %% =============================================================================

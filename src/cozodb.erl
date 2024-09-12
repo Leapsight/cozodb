@@ -220,7 +220,7 @@
 -type query_opts()          ::  #{
                                     encoding => json | undefined,
                                     read_only => boolean(),
-                                    params => map()
+                                    parameters => map()
                                 }.
 -type query_return()        ::  {ok, query_result()}
                                 | {ok, Json :: binary()}
@@ -463,19 +463,19 @@ run(DbHandle, Query, #{sparql := true} = Opts) ->
 
 run(DbHandle, Script, #{encoding := json} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(maps:get(params, Opts, #{})),
+    Params = map_to_json(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_json_nif(DbHandle, Script, Params, ReadOnly);
 
 run(DbHandle, Script, #{encoding := map} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(maps:get(params, Opts, #{})),
+    Params = map_to_json(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_str_nif(DbHandle, Script, Params, ReadOnly);
 
 run(DbHandle, Script, Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts) ->
-    Params = maps:get(params, Opts, #{}),
+    Params = maps:get(parameters, Opts, #{}),
     ReadOnly = maps:get(read_only, Opts, false),
     Meta = #{script => Script, db_handle => DbHandle, options => Opts},
     run_script_span(DbHandle, Script, Params, ReadOnly, Meta).

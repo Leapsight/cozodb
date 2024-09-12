@@ -17,6 +17,7 @@
 // =============================================================================
 
 // Rust std libs
+
 use core::hash::Hash;
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
@@ -350,6 +351,12 @@ impl<'a> DataValueWrapper {
             return Ok(DataValueWrapper(DataValue::Bool(false)));
         }
 
+        // All other atoms converted to strings
+        if term.is_atom() {
+            let string = term.atom_to_string()?;
+            return Ok(DataValueWrapper(DataValue::Str(string.into())));
+        }
+
         if let Ok(num) = term.decode::<i64>() {
             return Ok(DataValueWrapper(DataValue::Num(cozo::Num::Int(num))));
         } else if let Ok(num) = term.decode::<f64>() {
@@ -574,9 +581,6 @@ fn resource<'a>(env: Env<'a>, db_handle: Term<'a>) ->
     Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
 
 }
-
-
-
 
 
 /// Returns the result of running script
@@ -1015,16 +1019,44 @@ fn get_db(db_id: i32) -> Option<DbInstance> {
 }
 
 
+// // Helper function to convert Erlang map to BTreeMap
+// fn convert_to_btreemap(map_term: Term) ->
+// NifResult<BTreeMap<String, DataValue>> {
+//     let map_iterator: MapIterator = map_term.decode()?;
+
+//     let mut btree: BTreeMap<String, DataValue> = BTreeMap::new();
+
+//     for (key, value) in map_iterator {
+//         let key_str: String = key.decode()?;
+//         let data_value = DataValueWrapper::decode(value)?.0;  // Use the decode function here
+//         btree.insert(key_str, data_value);
+//     }
+
+//     Ok(btree)
+// }
+
 // Helper function to convert Erlang map to BTreeMap
+// Atom keys are converted to strings
 fn convert_to_btreemap(map_term: Term) ->
-NifResult<BTreeMap<String, DataValue>> {
+    NifResult<BTreeMap<String, DataValue>> {
     let map_iterator: MapIterator = map_term.decode()?;
 
     let mut btree: BTreeMap<String, DataValue> = BTreeMap::new();
 
     for (key, value) in map_iterator {
-        let key_str: String = key.decode()?;
-        let data_value = DataValueWrapper::decode(value)?.0;  // Use the decode function here
+        // Check if the key is an Atom or a String
+        let key_str: String = if key.is_atom() {
+            key.atom_to_string()?
+        } else if let Ok(string_key) = key.decode::<String>() {
+            string_key
+        } else {
+            return Err(rustler::Error::BadArg);
+        };
+
+        // Decode the value into DataValue
+        let data_value = DataValueWrapper::decode(value)?.0;
+
+        // Insert into the BTreeMap
         btree.insert(key_str, data_value);
     }
 

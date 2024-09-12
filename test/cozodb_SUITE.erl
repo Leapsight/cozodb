@@ -210,6 +210,7 @@ all_cases() ->
 
 param_cases() ->
     [
+        params_as_list,
         param_null,
         param_boolean,
         param_integer,
@@ -1081,6 +1082,15 @@ cozo_spawn(Counter) ->
 %% =============================================================================
 %% PARAMS
 %% =============================================================================
+
+params_as_list(Config) ->
+    Engine = ?config(db_engine, Config),
+    Path = ?config(db_path, Config),
+    {ok, Db} = cozodb:open(Engine, Path),
+    ?assertMatch(
+        {ok, #{rows := [ [null] ]}},
+        cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => [{<<"a">>, null}]})
+    ).
 
 param_null(Config) ->
     Engine = ?config(db_engine, Config),

@@ -220,7 +220,15 @@
 -type query_opts()          ::  #{
                                     encoding => json | undefined,
                                     read_only => boolean(),
-                                    parameters => map()
+                                    parameters =>
+                                        #{
+                                            Key :: atom() | binary() =>
+                                                Value :: any()
+                                        }
+                                        | [{
+                                            Key :: atom() | binary(),
+                                            Value :: any()
+                                        }]
                                 }.
 -type query_return()        ::  {ok, query_result()}
                                 | {ok, Json :: binary()}
@@ -382,7 +390,7 @@ when is_atom(Engine), is_binary(Path), is_map(Opts) ->
             2 => "a nonempty string or binary"
         }),
 
-    new(atom_to_binary(Engine), Path, map_to_json(Opts)).
+    new(atom_to_binary(Engine), Path, term_to_json_object(Opts)).
 
 
 %% -----------------------------------------------------------------------------
@@ -463,13 +471,13 @@ run(DbHandle, Query, #{sparql := true} = Opts) ->
 
 run(DbHandle, Script, #{encoding := json} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(maps:get(parameters, Opts, #{})),
+    Params = term_to_json_object(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_json_nif(DbHandle, Script, Params, ReadOnly);
 
 run(DbHandle, Script, #{encoding := map} = Opts)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
-    Params = map_to_json(maps:get(parameters, Opts, #{})),
+    Params = term_to_json_object(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_str_nif(DbHandle, Script, Params, ReadOnly);
 
@@ -518,7 +526,7 @@ when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts) ->
 
 import(DbHandle, Relations)
 when ?IS_DB_HANDLE(DbHandle) andalso is_map(Relations) ->
-    import(DbHandle, map_to_json(Relations));
+    import(DbHandle, term_to_json_object(Relations));
 
 import(DbHandle, Relations)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Relations) ->
@@ -1100,7 +1108,11 @@ close_nif(_DbHandle) ->
 
 
 %% @private
-run_script_span(DbHandle, Script, Params, ReadOnly, Meta) ->
+run_script_span(DbHandle, Script, Params, ReadOnly, Meta)
+when is_list(Params) ->
+    run_script_span(DbHandle, Script, maps:from_list(Params), ReadOnly, Meta);
+
+run_script_span(DbHandle, Script, Params, ReadOnly, Meta) when is_map(Params) ->
     telemetry:span([cozodb, run], Meta, fun() ->
         case run_script_nif(DbHandle, Script, Params, ReadOnly) of
             {ok, _} = OK ->
@@ -1381,9 +1393,13 @@ index_type_op(_) -> error(badarg).
 
 
 %% @private
--spec map_to_json(Term :: map()) -> binary() | no_return().
+-spec term_to_json_object(Term :: map() | [{atom() | binary(), any()}]) ->
+    binary() | no_return().
 
-map_to_json(Term) when is_map(Term) ->
+term_to_json_object(Term) when is_list(Term) ->
+    term_to_json_object(maps:from_list(Term));
+
+term_to_json_object(Term) when is_map(Term) ->
     Encoder = json_encoder(),
     try
         Encoder:encode(Term)

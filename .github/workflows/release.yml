@@ -46,7 +46,7 @@ jobs:
       - name: Extract project version and branch/tag
         shell: bash
         run: |
-          # Get the project version from cozodb.app.src
+          # Ensure the source file exists before attempting extraction
           if [[ -f "src/cozodb.app.src" ]]; then
             PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p' src/cozodb.app.src | head -n1)
           else
@@ -57,16 +57,20 @@ jobs:
           if [[ -z "$PROJECT_VERSION" ]]; then
             PROJECT_VERSION="0.0.0"
           fi
+
           echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_ENV
           echo "Extracted PROJECT_VERSION=$PROJECT_VERSION"
 
           # Determine if it's a tag or a branch
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             BRANCH_OR_TAG="${GITHUB_REF#refs/tags/}"
-          else
+          elif [[ "$GITHUB_REF" == refs/heads/* ]]; then
             BRANCH_OR_TAG="${GITHUB_REF#refs/heads/}"
+          else
+            BRANCH_OR_TAG="unknown"
           fi
           echo "BRANCH_OR_TAG=$BRANCH_OR_TAG" >> $GITHUB_ENV
+          echo "Extracted BRANCH_OR_TAG=$BRANCH_OR_TAG"
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

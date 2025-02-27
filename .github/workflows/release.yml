@@ -43,12 +43,17 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+
       - name: Extract project version and branch/tag
         shell: bash
         run: |
           # Ensure the source file exists before attempting extraction
           if [[ -f "src/cozodb.app.src" ]]; then
-            PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p' src/cozodb.app.src | head -n1)
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+              PROJECT_VERSION=$(sed -E -n 's/.*{vsn, "([^"]+)".*/\1/p' src/cozodb.app.src | head -n1)
+            else
+              PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p' src/cozodb.app.src | head -n1)
+            fi
           else
             PROJECT_VERSION="0.0.0"
           fi
@@ -71,11 +76,13 @@ jobs:
           fi
           echo "BRANCH_OR_TAG=$BRANCH_OR_TAG" >> $GITHUB_ENV
           echo "Extracted BRANCH_OR_TAG=$BRANCH_OR_TAG"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: '${{ matrix.job.target }}'
+
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -84,12 +91,14 @@ jobs:
             build-essential cmake liblz4-dev libncurses-dev \
             libsnappy-dev libssl-dev liburing-dev liburing2 \
             openssl pkg-config bash curl git tar
+
       - name: Set PKG_CONFIG_PATH for Cross-Compilation
         if: runner.os == 'Linux'
         shell: bash
         run: |
           export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
       - name: Build the project
         id: build-crate
         uses: philss/rustler-precompiled-action@v1.1.4
@@ -100,6 +109,7 @@ jobs:
           nif-version: '${{ matrix.nif }}'
           use-cross: '${{ matrix.job.use-cross }}'
           project-dir: native/cozodb
+
       - name: Rename Artifact with Branch & Version
         shell: bash
         run: |
@@ -107,11 +117,13 @@ jobs:
           NEW_NAME="cozodb-${{ env.BRANCH_OR_TAG }}-${{ env.PROJECT_VERSION }}-${{ matrix.job.target }}.tar.gz"
           mv "${{ steps.build-crate.outputs.file-path }}" "$NEW_NAME"
           echo "RENAMED_ARTIFACT=$NEW_NAME" >> $GITHUB_ENV
+
       - name: Artifact upload
         uses: actions/upload-artifact@v4
         with:
           name: '${{ env.RENAMED_ARTIFACT }}'
           path: '${{ env.RENAMED_ARTIFACT }}'
+
       - name: Publish archives and packages
         uses: softprops/action-gh-release@v2
         with:

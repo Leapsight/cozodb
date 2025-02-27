@@ -3,6 +3,8 @@ name: Build precompiled NIFs
   push:
     branches:
       - main
+      - augoor
+      - avoid_234
     tags:
       - '*'
 jobs:
@@ -39,12 +41,20 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
-      - name: Extract project version
+      - name: Extract project version and branch/tag
         shell: bash
         run: >
           # Get the project version from cozodb.app.src
           echo "PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p''
           src.cozodb.app.src | head -n1)" >> $GITHUB_ENV
+
+          # Determine if it's a tag or a branch
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            BRANCH_OR_TAG="${GITHUB_REF#refs/tags/}"
+          else
+            BRANCH_OR_TAG="${GITHUB_REF#refs/heads/}"
+          fi
+          echo "BRANCH_OR_TAG=$BRANCH_OR_TAG" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -65,14 +75,21 @@ jobs:
           nif-version: '${{ matrix.nif }}'
           use-cross: '${{ matrix.job.use-cross }}'
           project-dir: native/cozodb
+      - name: Rename Artifact with Branch & Version
+        shell: bash
+        run: |
+          ORIGINAL_NAME="${{ steps.build-crate.outputs.file-name }}"
+          NEW_NAME="cozodb-${{ env.BRANCH_OR_TAG }}-${{ env.PROJECT_VERSION }}-${{ matrix.job.target }}.tar.gz"
+          mv "${{ steps.build-crate.outputs.file-path }}" "$NEW_NAME"
+          echo "RENAMED_ARTIFACT=$NEW_NAME" >> $GITHUB_ENV
       - name: Artifact upload
         uses: actions/upload-artifact@v4
         with:
-          name: '${{ steps.build-crate.outputs.file-name }}'
-          path: '${{ steps.build-crate.outputs.file-path }}'
+          name: '${{ env.RENAMED_ARTIFACT }}'
+          path: '${{ env.RENAMED_ARTIFACT }}'
       - name: Publish archives and packages
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ steps.build-crate.outputs.file-path }}
+            ${{ env.RENAMED_ARTIFACT }}
         if: 'startsWith(github.ref, ''refs/tags/'')'

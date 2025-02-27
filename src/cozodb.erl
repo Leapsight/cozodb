@@ -677,18 +677,14 @@ create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) -
 
 
 %% -----------------------------------------------------------------------------
-%% @doc List columns for relation
+%% @doc Removes a relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_relation(
-    DbHandle :: db_handle(), RelNames :: [binary() | list()]) ->
+-spec remove_relation(DbHandle :: db_handle(), RelName :: binary()) ->
     query_return().
 
-remove_relation(DbHandle, RelName) when is_list(RelName) ->
-    remove_relation(DbHandle, list_to_binary(RelName));
-
-remove_relation(DbHandle, RelNames) ->
-    case run(DbHandle, <<"::remove", $\s, RelNames/binary>>) of
+remove_relation(DbHandle, RelName) when is_binary(RelName) ->
+    case run(DbHandle, <<"::remove", $\s, RelName/binary>>) of
         {ok, _} ->
             ok;
         {error, Reason} ->
@@ -700,8 +696,7 @@ remove_relation(DbHandle, RelNames) ->
 %% @doc List columns for relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_relations(
-    DbHandle :: db_handle(), RelNames :: [binary() | list()]) ->
+-spec remove_relations(DbHandle :: db_handle(), RelNames :: [binary()]) ->
     ok | {error, Reason :: any()}.
 
 remove_relations(DbHandle, RelNames0) ->

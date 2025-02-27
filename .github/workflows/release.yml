@@ -76,11 +76,20 @@ jobs:
         with:
           toolchain: stable
           target: '${{ matrix.job.target }}'
-      - name: Install build dependencies
+      - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends build-essential cmake liblz4-dev libncurses-dev libsnappy-dev libssl-dev liburing-dev liburing2
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake liblz4-dev libncurses-dev \
+            libsnappy-dev libssl-dev liburing-dev liburing2 \
+            openssl pkg-config bash curl git tar
+      - name: Set PKG_CONFIG_PATH for Cross-Compilation
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Build the project
         id: build-crate
         uses: philss/rustler-precompiled-action@v1.1.4

@@ -7,7 +7,7 @@ name: Build precompiled NIFs
       - avoid_234
     tags:
       - '*'
-    workflow_dispatch:
+  workflow_dispatch:
 jobs:
   build_release:
     name: 'NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})'

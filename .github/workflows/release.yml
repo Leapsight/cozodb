@@ -5,6 +5,7 @@ name: Build precompiled NIFs
       - main
       - augoor
       - avoid_234
+      - gh_actions
     tags:
       - '*'
   workflow_dispatch:
@@ -46,8 +47,18 @@ jobs:
         shell: bash
         run: |
           # Get the project version from cozodb.app.src
-          echo "PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p'
-          src.cozodb.app.src | head -n1)" >> $GITHUB_ENV
+          if [[ -f "src/cozodb.app.src" ]]; then
+            PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p' src/cozodb.app.src | head -n1)
+          else
+            PROJECT_VERSION="0.0.0"
+          fi
+
+          # If extraction fails, use a default version
+          if [[ -z "$PROJECT_VERSION" ]]; then
+            PROJECT_VERSION="0.0.0"
+          fi
+          echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_ENV
+          echo "Extracted PROJECT_VERSION=$PROJECT_VERSION"
 
           # Determine if it's a tag or a branch
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
@@ -61,6 +72,11 @@ jobs:
         with:
           toolchain: stable
           target: '${{ matrix.job.target }}'
+      - name: Install build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends build-essential cmake liblz4-dev libncurses-dev libsnappy-dev libssl-dev liburing-dev liburing2
       - name: Build the project
         id: build-crate
         uses: philss/rustler-precompiled-action@v1.1.4

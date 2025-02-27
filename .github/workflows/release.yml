@@ -44,9 +44,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Extract project version and branch/tag
         shell: bash
-        run: >
+        run: |
           # Get the project version from cozodb.app.src
-          echo "PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p''
+          echo "PROJECT_VERSION=$(sed -n 's/.*{vsn, "\([^"]*\)".*/\1/p'
           src.cozodb.app.src | head -n1)" >> $GITHUB_ENV
 
           # Determine if it's a tag or a branch

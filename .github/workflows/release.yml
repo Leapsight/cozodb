@@ -61,11 +61,6 @@ jobs:
         with:
           toolchain: stable
           target: '${{ matrix.job.target }}'
-      - name: Install OTP Rebar3
-        uses: erlef/setup-beam@v1
-        with:
-          otp-version: '26.2.5.7'
-          rebar3-version: '3.24.0'
       - name: Build the project
         id: build-crate
         uses: philss/rustler-precompiled-action@v1.1.4

@@ -46,25 +46,25 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ matrix.job.os }}-${{ matrix.job.target }}-cargo-
+      # - uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/bin/
+      #       ~/.cargo/registry/index/
+      #       ~/.cargo/registry/cache/
+      #       ~/.cargo/git/db/
+      #     key: ${{ matrix.job.os }}-${{ matrix.job.target }}-cargo-
 
-      - name: Install prerequisites (Linux)
-        shell: bash
-        run: |
-          case ${{ matrix.job.target }} in
-            arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
-            aarch64-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
-          esac
+      # - name: Install prerequisites (Linux)
+      #   shell: bash
+      #   run: |
+      #     case ${{ matrix.job.target }} in
+      #       arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
+      #       aarch64-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
+      #     esac
 
       - name: Install build dependencies (Linux)
-        if: runner.os == 'Linux' && contains(matrix.job.target, '-gnu')
+        if: runner.os == 'Linux' && !contains(matrix.job.target, '-musl')
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
@@ -80,46 +80,46 @@ jobs:
             liburing2 \
             pkg-config \
             tar
+          export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
 
       - name: Install build dependencies (MUSL Linux)
         if: runner.os == 'Linux' && contains(matrix.job.target, '-musl')
         run: |
-          sudo apk update
-          sudo apk add --no-cache \
-            musl-tools \
-            build-base \
-            cmake \
-            curl \
-            git \
-            lz4-dev \
-            ncurses-dev \
-            snappy-dev \
-            openssl-dev \
-            liburing-dev \
-            pkgconf \
-            tar
-          export CFLAGS="-fPIC"
-          export CXXFLAGS="-fPIC"
-          export RUSTFLAGS="-C target-feature=-crt-static -C relocation-model=pic"
-          echo "CFLAGS=$CFLAGS" >> $GITHUB_ENV
-          echo "CXXFLAGS=$CXXFLAGS" >> $GITHUB_ENV
-          echo "RUSTFLAGS=$RUSTFLAGS" >> $GITHUB_ENV
+          # For MUSL we use cross which runs on a Docker container
+          # So dependencies must be installed inside the cross Docker container
+          cross run --target=${{ matrix.job.target }} -- \
+            sh -c "apk update && apk add --no-cache \
+              build-base \
+              cmake \
+              curl \
+              git \
+              lz4-dev \
+              ncurses-dev \
+              snappy-dev \
+              openssl-dev \
+              liburing-dev \
+              pkgconf \
+              tar"
+            cross run --target=${{ matrix.job.target }} -- \
+            sh -c "export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/" && echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV"
 
-      - name: Check and Configure liburing
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          echo "Checking if pkg-config can find liburing..."
-          export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
-          echo "export PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> ~/.bashrc
+      # - name: Check and Configure liburing
+      #   if: runner.os == 'Linux'
+      #   shell: bash
+      #   run: |
+      #     echo "Checking if pkg-config can find liburing..."
+      #     export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
+      #     echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+      #     echo "export PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> ~/.bashrc
 
-          if pkg-config --exists liburing; then
-            echo "✅ liburing found. Using dynamic linking."
-          else
-            echo "❌ liburing not found. Forcing static linking."
-            echo "LIBURING_STATIC=1" >> $GITHUB_ENV
-          fi
+      #     if pkg-config --exists liburing; then
+      #       echo "✅ liburing found. Using dynamic linking."
+      #     else
+      #       echo "❌ liburing not found. Forcing static linking."
+      #       echo "LIBURING_STATIC=1" >> $GITHUB_ENV
+      #     fi
 
       - name: Extract project version and branch/tag
         shell: bash

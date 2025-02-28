@@ -9,6 +9,10 @@ name: Build precompiled NIFs
     tags:
       - '*'
   workflow_dispatch:
+
+env:
+  NIF_DIRECTORY: "native/cozodb"
+
 jobs:
   build_release:
     name: 'NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})'
@@ -20,29 +24,62 @@ jobs:
           - '2.17'
         job:
           - target: arm-unknown-linux-gnueabihf
-            os: ubuntu-24.04
+            os: ubuntu-20.04
             use-cross: true
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04
+            os: ubuntu-20.04
             use-cross: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04
+            os: ubuntu-20.04
             use-cross: true
           - target: aarch64-apple-darwin
             os: macos-13
-          - target: riscv64gc-unknown-linux-gnu
-            os: ubuntu-24.04
-            use-cross: true
           - target: x86_64-apple-darwin
             os: macos-13
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
+            os: ubuntu-20.04
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-24.04
+            os: ubuntu-20.04
             use-cross: true
+
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+
+      - uses: actions/cache@v3.0.3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ matrix.job.os }}-${{ matrix.job.target }}-cargo-
+
+      - name: Install prerequisites (Linux)
+        shell: bash
+        run: |
+          case ${{ matrix.job.target }} in
+            arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
+            aarch64-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
+          esac
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            curl \
+            git \
+            liblz4-dev \
+            libncurses-dev \
+            libsnappy-dev \
+            libssl-dev \
+            liburing-dev \
+            liburing2 \
+            pkg-config \
+            tar
 
       - name: Extract project version and branch/tag
         shell: bash
@@ -83,14 +120,6 @@ jobs:
           toolchain: stable
           target: '${{ matrix.job.target }}'
 
-      - name: Install build dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake liblz4-dev libncurses-dev \
-            libsnappy-dev libssl-dev liburing-dev liburing2 \
-            openssl pkg-config bash curl git tar
 
       - name: Set PKG_CONFIG_PATH for Cross-Compilation
         if: runner.os == 'Linux'
@@ -98,6 +127,16 @@ jobs:
         run: |
           export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+      - name: Force Position-Independent Code (PIC)
+        shell: bash
+        run: |
+          export CFLAGS="-fPIC"
+          export CXXFLAGS="-fPIC"
+          export RUSTFLAGS="-C relocation-model=pic"
+          echo "CFLAGS=$CFLAGS" >> $GITHUB_ENV
+          echo "CXXFLAGS=$CXXFLAGS" >> $GITHUB_ENV
+          echo "RUSTFLAGS=$RUSTFLAGS" >> $GITHUB_ENV
 
       - name: Build the project
         id: build-crate
@@ -108,7 +147,7 @@ jobs:
           target: '${{ matrix.job.target }}'
           nif-version: '${{ matrix.nif }}'
           use-cross: '${{ matrix.job.use-cross }}'
-          project-dir: native/cozodb
+          project-dir: env.NIF_DIRECTORY
 
       - name: Rename Artifact with Branch & Version
         shell: bash

@@ -1,4 +1,5 @@
 [build.env]
 passthrough = [
-  "RUSTLER_NIF_VERSION"
+  "RUSTLER_NIF_VERSION",
+  "PKG_CONFIG_PATH"
 ]

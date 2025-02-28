@@ -55,7 +55,6 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ matrix.job.os }}-${{ matrix.job.target }}-cargo-
 
-
       - name: Install prerequisites (Linux)
         shell: bash
         run: |
@@ -121,7 +120,6 @@ jobs:
           toolchain: stable
           target: '${{ matrix.job.target }}'
 
-
       - name: Set PKG_CONFIG_PATH for Cross-Compilation
         if: runner.os == 'Linux'
         shell: bash
@@ -129,7 +127,8 @@ jobs:
           export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
-      - name: Force Position-Independent Code (PIC)
+      - name: Force Position-Independent Code (PIC) (Linux-musl)
+        if: runner.os == 'Linux' && contains(matrix.job.target, '-musl')
         shell: bash
         run: |
           export CFLAGS="-fPIC"

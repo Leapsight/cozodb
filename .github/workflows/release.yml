@@ -89,6 +89,7 @@ jobs:
         run: |
           # For MUSL we use cross which runs on a Docker container
           # So dependencies must be installed inside the cross Docker container
+          cargo install cross --git https://github.com/cross-rs/cross
           cross run --target=${{ matrix.job.target }} -- \
             sh -c "apk update && apk add --no-cache \
               build-base \
@@ -102,7 +103,7 @@ jobs:
               liburing-dev \
               pkgconf \
               tar"
-            cross run --target=${{ matrix.job.target }} -- \
+          cross run --target=${{ matrix.job.target }} -- \
             sh -c "export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/" && echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV"
 
       # - name: Check and Configure liburing

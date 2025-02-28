@@ -64,7 +64,7 @@ jobs:
           esac
 
       - name: Install build dependencies (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && contains(matrix.job.target, '-gnu')
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
@@ -81,11 +81,23 @@ jobs:
             pkg-config \
             tar
 
-      - name: Install build dependencies and force dynamic linking and Position-Independent Code (PIC) (Linux-musl)
+      - name: Install build dependencies (MUSL Linux)
         if: runner.os == 'Linux' && contains(matrix.job.target, '-musl')
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends musl-tools
+          sudo apk update
+          sudo apk add --no-cache \
+            musl-tools \
+            build-base \
+            cmake \
+            curl \
+            git \
+            lz4-dev \
+            ncurses-dev \
+            snappy-dev \
+            openssl-dev \
+            liburing-dev \
+            pkgconf \
+            tar
           export CFLAGS="-fPIC"
           export CXXFLAGS="-fPIC"
           export RUSTFLAGS="-C target-feature=-crt-static -C relocation-model=pic"

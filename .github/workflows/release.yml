@@ -24,22 +24,22 @@ jobs:
           - '2.17'
         job:
           - target: arm-unknown-linux-gnueabihf
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             use-cross: true
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             use-cross: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             use-cross: true
           - target: aarch64-apple-darwin
             os: macos-13
           - target: x86_64-apple-darwin
             os: macos-13
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-24.04
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             use-cross: true
 
     steps:

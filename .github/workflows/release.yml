@@ -81,6 +81,21 @@ jobs:
             pkg-config \
             tar
 
+      - name: Check and Configure liburing
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "Checking if pkg-config can find liburing..."
+          export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+          if pkg-config --exists liburing; then
+            echo "✅ liburing found. Using dynamic linking."
+          else
+            echo "❌ liburing not found. Forcing static linking."
+            echo "LIBURING_STATIC=1" >> $GITHUB_ENV
+          fi
+
       - name: Extract project version and branch/tag
         shell: bash
         run: |
@@ -119,13 +134,6 @@ jobs:
         with:
           toolchain: stable
           target: '${{ matrix.job.target }}'
-
-      - name: Set PKG_CONFIG_PATH for Cross-Compilation
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          export PKG_CONFIG_PATH="/usr/lib/${{ matrix.job.target }}/pkgconfig/:/usr/lib/pkgconfig/"
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
       - name: Force Position-Independent Code (PIC) (Linux-musl)
         if: runner.os == 'Linux' && contains(matrix.job.target, '-musl')

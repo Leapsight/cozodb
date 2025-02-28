@@ -81,6 +81,18 @@ jobs:
             pkg-config \
             tar
 
+      - name: Install build dependencies and force dynamic linking and Position-Independent Code (PIC) (Linux-musl)
+        if: runner.os == 'Linux' && contains(matrix.job.target, '-musl')
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends musl-tools
+          export CFLAGS="-fPIC"
+          export CXXFLAGS="-fPIC"
+          export RUSTFLAGS="-C target-feature=-crt-static relocation-model=pic"
+          echo "CFLAGS=$CFLAGS" >> $GITHUB_ENV
+          echo "CXXFLAGS=$CXXFLAGS" >> $GITHUB_ENV
+          echo "RUSTFLAGS=$RUSTFLAGS" >> $GITHUB_ENV
+
       - name: Check and Configure liburing
         if: runner.os == 'Linux'
         shell: bash
@@ -135,17 +147,6 @@ jobs:
         with:
           toolchain: stable
           target: '${{ matrix.job.target }}'
-
-      - name: Force Position-Independent Code (PIC) (Linux-musl)
-        if: runner.os == 'Linux' && contains(matrix.job.target, '-musl')
-        shell: bash
-        run: |
-          export CFLAGS="-fPIC"
-          export CXXFLAGS="-fPIC"
-          export RUSTFLAGS="-C relocation-model=pic"
-          echo "CFLAGS=$CFLAGS" >> $GITHUB_ENV
-          echo "CXXFLAGS=$CXXFLAGS" >> $GITHUB_ENV
-          echo "RUSTFLAGS=$RUSTFLAGS" >> $GITHUB_ENV
 
       - name: Build the project
         id: build-crate

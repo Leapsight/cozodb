@@ -1087,6 +1087,24 @@ params_as_list(Config) ->
     ?assertMatch(
         {ok, #{rows := [ [null] ]}},
         cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => [{<<"a">>, null}]})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [null] ]}},
+        cozodb:run(
+            Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => null}}
+        )
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [1], [3.1], [<<"a">>], [{json, <<"{}">>}] ]}},
+        cozodb:run(
+            Db,
+            <<"data[x] <- $a\n ?[x] := data[x]">>,
+            #{parameters => #{
+                <<"a">> => [
+                    [1], [<<"a">>], [3.1], [{json, <<"{}">>}]
+                ]
+            }}
+        )
     ).
 
 param_null(Config) ->

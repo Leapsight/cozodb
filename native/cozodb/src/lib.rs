@@ -40,6 +40,7 @@ use rustler::ResourceArc;
 use rustler::Term;
 use rustler::types::LocalPid;
 
+
 // Used for global state
 use lazy_static::lazy_static;
 

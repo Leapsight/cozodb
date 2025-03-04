@@ -521,7 +521,7 @@ when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts) ->
 %% '''
 %% @end
 %% -----------------------------------------------------------------------------
--spec import(DbHandle :: db_handle(), Relations :: binary() | relations()) ->
+-spec import(DbHandle :: db_handle(), Relations :: iodata() | relations()) ->
     ok | {error, Reason :: any()}.
 
 import(DbHandle, Relations)
@@ -530,7 +530,11 @@ when ?IS_DB_HANDLE(DbHandle) andalso is_map(Relations) ->
 
 import(DbHandle, Relations)
 when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Relations) ->
-    import_relations_nif(DbHandle, Relations).
+    import_relations_nif(DbHandle, Relations);
+
+import(DbHandle, Relations)
+when ?IS_DB_HANDLE(DbHandle) andalso is_list(Relations) ->
+    import_relations_nif(DbHandle, iolist_to_binary(Relations)).
 
 
 %% -----------------------------------------------------------------------------
@@ -680,8 +684,11 @@ create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) -
 %% @doc Removes a relation
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_relation(DbHandle :: db_handle(), RelName :: binary()) ->
+-spec remove_relation(DbHandle :: db_handle(), RelName :: binary() | string()) ->
     query_return().
+
+remove_relation(DbHandle, RelName) when is_list(RelName) ->
+    remove_relation(DbHandle, list_to_binary(RelName));
 
 remove_relation(DbHandle, RelName) when is_binary(RelName) ->
     case run(DbHandle, <<"::remove", $\s, RelName/binary>>) of
@@ -1184,7 +1191,7 @@ parse_sparql_nif(_DbHandle, _Query) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec import_relations_nif(DbHandle :: db_handle(), Relations :: binary()) ->
+-spec import_relations_nif(DbHandle :: db_handle(), Relations :: string()) ->
     ok | {error, Reason :: any()}.
 
 import_relations_nif(_DbHandle, _Relations) ->
@@ -1389,40 +1396,26 @@ index_type_op(_) -> error(badarg).
 
 %% @private
 -spec term_to_json_object(Term :: map() | [{atom() | binary(), any()}]) ->
-    binary() | no_return().
+    iodata() | no_return().
 
 term_to_json_object(Term) when is_list(Term) ->
     term_to_json_object(maps:from_list(Term));
 
 term_to_json_object(Term) when is_map(Term) ->
-    Encoder = json_encoder(),
     try
-        Encoder:encode(Term)
+        json:encode(Term)
     catch
         error:function_clause:Stacktrace ->
-            Cause =
-                case Stacktrace of
-                    [{thoas_encode, key, [Key, _], _} | _] ->
+            Msg = case Stacktrace of
+                    [{json, key, [Key, _], _} | _] ->
                         lists:flatten(
                             io_lib:format("invalid JSON key '~p'", [Key])
                         );
                     _ ->
                         "json encoding failed"
                 end,
-            error({badarg, Cause})
+            error({badarg, Msg})
     end.
-
-
-
-%%--------------------------------------------------------------------
-%% @doc returns the default json encoder (thoas)
-%% @end
-%%--------------------------------------------------------------------
--spec json_encoder() -> atom().
-
-json_encoder() ->
-    application:get_env(?APP, json_parser, thoas).
-
 
 
 

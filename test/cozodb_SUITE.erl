@@ -15,9 +15,6 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %%
-%% Based on original work by Mathieu Kerjouan
-%%
-%%
 %%  Based on original work by Mathieu Kerjouan with the following notice:
 %%
 %%  -------------------------------------------------------------------
@@ -548,7 +545,7 @@ air_routes(Config) ->
     DataDir = proplists:get_value(data_dir, Config, "test/cozodb_SUITE_data"),
     DataFile = filename:join(DataDir, "air-routes.json"),
     {ok, RawAirRoutes} = file:read_file(DataFile),
-    {ok, AirRoutes} = thoas:decode(RawAirRoutes),
+    AirRoutes = json:decode(RawAirRoutes),
     cozodb:import(Db, AirRoutes),
 
     %% cozodb:import_from_backup(Db, DataFile, RelNames),
@@ -843,7 +840,7 @@ maintenance_commands(Config) ->
         {badarg,"invalid JSON key '{}'"},
         cozodb:import(Db, #{ {} => {} })
     ),
-    Relations = #{stored => #{headers => [c1,c2], rows => []}},
+    Relations = #{stored => #{headers => [c1, c2], rows => []}},
     ok = cozodb:import(Db, Relations),
     {ok, _} = cozodb:export(Db, [<<"stored">>]),
 
@@ -1090,6 +1087,24 @@ params_as_list(Config) ->
     ?assertMatch(
         {ok, #{rows := [ [null] ]}},
         cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => [{<<"a">>, null}]})
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [null] ]}},
+        cozodb:run(
+            Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => null}}
+        )
+    ),
+    ?assertMatch(
+        {ok, #{rows := [ [1], [3.1], [<<"a">>], [{json, <<"{}">>}] ]}},
+        cozodb:run(
+            Db,
+            <<"data[x] <- $a\n ?[x] := data[x]">>,
+            #{parameters => #{
+                <<"a">> => [
+                    [1], [<<"a">>], [3.1], [{json, <<"{}">>}]
+                ]
+            }}
+        )
     ).
 
 param_null(Config) ->
@@ -1165,7 +1180,7 @@ param_json(Config) ->
     Engine = ?config(db_engine, Config),
     Path = ?config(db_path, Config),
     {ok, Db} = cozodb:open(Engine, Path),
-    Json = thoas:encode(#{foo => bar}),
+    Json = json:encode(#{foo => bar}),
     ?assertMatch(
         {ok, #{rows := [ [Json] ]}},
         cozodb:run(

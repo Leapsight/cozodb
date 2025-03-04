@@ -16,11 +16,9 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc cozodb_sup top level supervisor.
-%% @end
-%% -----------------------------------------------------------------------------
+
 -module(cozodb_sup).
+-moduledoc "The CozoDB top level supervisor.".
 -behaviour(supervisor).
 
 -export([start_link/0]).
@@ -28,18 +26,17 @@
 
 -define(SERVER, ?MODULE).
 
+%% =============================================================================
+%% API
+%% =============================================================================
+
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%% sup_flags() = #{strategy => strategy(),         % optional
-%%                 intensity => non_neg_integer(), % optional
-%%                 period => pos_integer()}        % optional
-%% child_spec() = #{id => child_id(),       % mandatory
-%%                  start => mfargs(),      % mandatory
-%%                  restart => restart(),   % optional
-%%                  shutdown => shutdown(), % optional
-%%                  type => worker(),       % optional
-%%                  modules => modules()}   % optional
+%% =============================================================================
+%% SUPERVISOR CALLBACKS
+%% =============================================================================
+
 init([]) ->
     SupFlags = #{
         strategy => one_for_all,
@@ -57,4 +54,3 @@ init([]) ->
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.
-

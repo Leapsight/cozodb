@@ -16,39 +16,37 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A transient worker that is used to listen to certain plum_db events and
-%% allow watchers to wait (blocking the caller) for certain conditions.
-%% This is used by plum_db_app during the startup process to wait for the
-%% following conditions:
-%%
-%% * Partition initisalisation – the worker subscribes to plum_db notifications
-%% and keeps track of each partition initialisation until they are all
-%% initialised (or failed to initilised) and replies to all watchers with a
-%% `ok' or `{error, FailedPartitions}', where FailedPartitions is a map() which
-%% keys are the partition number and the value is the reason for the failure.
-%% * Partition hashtree build – the worker subscribes to plum_db notifications
-%% and keeps track of each partition hashtree until they are all
-%% built (or failed to build) and replies to all watchers with a
-%% `ok' or `{error, FailedHashtrees}', where FailedHashtrees is a map() which
-%% keys are the partition number and the value is the reason for the failure.
-%%
-%% A watcher is any process which calls the functions wait_for_partitions/0,1
-%% and/or wait_for_hashtrees/0,1. Both functions will block the caller until
-%% the above conditions are met.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
+
 -module(cozodb_callback_monitor).
+-moduledoc """
+A transient worker that is used to listen to certain plum_db events and
+allow watchers to wait (blocking the caller) for certain conditions.
+This is used by plum_db_app during the startup process to wait for the
+following conditions:
+
+* Partition initisalisation – the worker subscribes to plum_db notifications
+and keeps track of each partition initialisation until they are all
+initialised (or failed to initilised) and replies to all watchers with a
+`ok' or `{error, FailedPartitions}', where FailedPartitions is a map() which
+keys are the partition number and the value is the reason for the failure.
+* Partition hashtree build – the worker subscribes to plum_db notifications
+and keeps track of each partition hashtree until they are all
+built (or failed to build) and replies to all watchers with a
+`ok' or `{error, FailedHashtrees}', where FailedHashtrees is a map() which
+keys are the partition number and the value is the reason for the failure.
+
+A watcher is any process which calls the functions wait_for_partitions/0,1
+and/or wait_for_hashtrees/0,1. Both functions will block the caller until
+the above conditions are met.
+
+""".
+
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 
--record(state, {
-    
-}).
+-record(state, {}).
 
--type state()                   ::  #state{}.
-
+-type state() :: #state{}.
 
 -export([start_link/0]).
 -export([stop/0]).
@@ -62,13 +60,9 @@
 -export([terminate/2]).
 -export([code_change/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 %% -----------------------------------------------------------------------------
 %% @doc Start the cozodb_callback_monitor server.
@@ -79,7 +73,6 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -89,14 +82,9 @@ start_link() ->
 stop() ->
     gen_server:stop(?MODULE).
 
-
-
-
 %% =============================================================================
 %% GEN_SERVER_ CALLBACKS
 %% =============================================================================
-
-
 
 %% @private
 -spec init([]) ->
@@ -106,14 +94,12 @@ stop() ->
     | {stop, term()}.
 
 init([]) ->
-    State = #state{
-    },
+    State = #state{},
 
     {ok, State}.
 
 handle_continue(_, State) ->
     {noreply, State}.
-
 
 %% @private
 -spec handle_call(term(), {pid(), term()}, state()) ->
@@ -129,7 +115,6 @@ handle_continue(_, State) ->
 handle_call(_Message, _From, State) ->
     {reply, {error, unsupported_call}, State}.
 
-
 %% @private
 -spec handle_cast(term(), state()) ->
     {noreply, state()}
@@ -140,7 +125,6 @@ handle_call(_Message, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-
 %% @private
 -spec handle_info(term(), state()) ->
     {noreply, state()}
@@ -150,7 +134,6 @@ handle_cast(_Msg, State) ->
 
 handle_info({'DOWN', _Ref, process, _Pid, _Reason}, #state{} = State) ->
     {noreply, State};
-
 handle_info(Event, State) ->
     ?LOG_INFO(#{
         reason => unsupported_event,
@@ -158,21 +141,17 @@ handle_info(Event, State) ->
     }),
     {noreply, State}.
 
-
 %% @private
 -spec terminate(term(), state()) -> term().
 
 terminate(_Reason, _State) ->
     ok.
 
-
 %% @private
 -spec code_change(term() | {down, term()}, state(), term()) -> {ok, state()}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %% =============================================================================
 %% PRIVATE

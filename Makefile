@@ -34,7 +34,7 @@ distclean: clean
 
 .PHONY: docs
 docs:
-	@$(REBAR3) edoc
+	@$(REBAR3) ex_doc
 
 .PHONY: eunit
 eunit:

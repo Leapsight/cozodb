@@ -1,16 +1,16 @@
-{application, cozodb,
- [{description, "Erlang NIF wrapper for CozoDB using Rustler."},
-  {vsn, "0.2.0"},
-  {registered, []},
-  {mod, {cozodb_app, []}},
-  {applications,
-   [kernel,
-    stdlib,
-    telemetry
-   ]},
-  {env,[]},
-  {modules, []},
+{application, cozodb, [
+    {description, "Erlang NIF wrapper for CozoDB using Rustler."},
+    {vsn, "0.2.1"},
+    {registered, []},
+    {mod, {cozodb_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        telemetry
+    ]},
+    {env, []},
+    {modules, []},
 
-  {licenses, ["Apache 2.0"]},
-  {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}
- ]}.
+    {licenses, ["Apache 2.0"]},
+    {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}
+]}.

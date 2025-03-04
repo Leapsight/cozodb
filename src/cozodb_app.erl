@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  cozodb_app.erl -
 %%
-%%  Copyright (c) 2023 Leapsight Holdings Limited. All rights reserved.
+%%  Copyright (c) 2023-2025 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,10 +16,6 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 
 -module(cozodb_app).
 
@@ -28,16 +24,12 @@
 -export([start/2]).
 -export([stop/1]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
 start(_StartType, _StartArgs) ->
     cozodb_sup:start_link().
 
-
 stop(_State) ->
     ok.
-

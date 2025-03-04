@@ -6,6 +6,4 @@
 
 -define(ERROR_OPTS(Cause), ?ERROR_OPTS(Cause, #{})).
 
--define(ERROR_OPTS(Cause, Meta),
-    [{error_info, #{module => ?MODULE, cause => Cause, meta => Meta}}]
-).
+-define(ERROR_OPTS(Cause, Meta), [{error_info, #{module => ?MODULE, cause => Cause, meta => Meta}}]).

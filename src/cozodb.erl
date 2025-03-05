@@ -1299,7 +1299,7 @@ term_to_json_object(Term) when is_list(Term) ->
 
 term_to_json_object(Term) when is_map(Term) ->
     try
-        json:encode(Term)
+        iolist_to_binary(json:encode(Term))
     catch
         error:function_clause:Stacktrace ->
             Msg =

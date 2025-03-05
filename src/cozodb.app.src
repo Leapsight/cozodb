@@ -1,6 +1,6 @@
 {application, cozodb, [
     {description, "Erlang NIF wrapper for CozoDB using Rustler."},
-    {vsn, "0.2.2"},
+    {vsn, "0.2.3"},
     {registered, []},
     {mod, {cozodb_app, []}},
     {applications, [
@@ -12,6 +12,6 @@
     {modules, []},
     {exclude_paths, ["priv/crates*"]},
     {include_paths, ["native", "examples", "doc_extras", "doc", "config"]},
-    {licenses, ["Apache 2.0"]},
+    {licenses, ["Apache-2.0"]},
     {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}
 ]}.

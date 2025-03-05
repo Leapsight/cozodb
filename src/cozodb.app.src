@@ -10,8 +10,17 @@
     ]},
     {env, []},
     {modules, []},
-    {exclude_paths, ["priv/crates*"]},
-    {include_paths, ["native", "examples", "doc_extras", "doc", "config"]},
+    {exclude_paths, [
+        "priv/crates*"
+    ]},
+    {include_paths, [
+        "native/.cargo",
+        "native/src",
+        "examples",
+        "doc_extras",
+        "doc",
+        "config"
+    ]},
     {licenses, ["Apache-2.0"]},
     {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}
 ]}.

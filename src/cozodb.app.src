@@ -1,6 +1,6 @@
 {application, cozodb, [
     {description, "Erlang NIF wrapper for CozoDB using Rustler."},
-    {vsn, "0.2.3"},
+    {vsn, "0.2.5"},
     {registered, []},
     {mod, {cozodb_app, []}},
     {applications, [
@@ -10,16 +10,17 @@
     ]},
     {env, []},
     {modules, []},
-    {exclude_paths, [
-        "priv/crates*"
-    ]},
-    {include_paths, [
+    {files, [
+        "include",
         "native/.cargo",
         "native/src",
-        "examples",
-        "doc_extras",
-        "doc",
-        "config"
+        "native/Cargo.lock",
+        "native/Cargo.toml",
+        "src",
+        "LICENSE",
+        "README.md",
+        "rebar.config",
+        "rebar.lock"
     ]},
     {licenses, ["Apache-2.0"]},
     {links, [{"GitHub", "https://github.com/leapsight/cozodb"}]}

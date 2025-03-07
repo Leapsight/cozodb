@@ -368,6 +368,38 @@ For more details, see the <a href="https://docs.cozodb.org/en/latest/vector.html
 
 -on_load(init/0).
 
+
+
+
+%% =============================================================================
+%% TELEMETRY_REGISTRY DECLARATIONS
+%% =============================================================================
+
+-telemetry_event #{
+                   event => [cozodb, run, start],
+                   description =>
+                    <<"Emitted at the start of the CozoScript execution">>,
+                   measurements => <<
+                   "#{system_time => non_neg_integer(), "
+                   "monotonic_time => non_neg_integer()}"
+                   >>,
+                   metadata => <<"#{}">>
+                  }.
+-telemetry_event #{
+                   event => [cozodb, run, stop],
+                   description =>
+                    <<"Emitted at the end of the CozoScript execution">>,
+                   measurements => <<"#{duration => non_neg_integer()}">>,
+                   metadata => <<"#{}">>
+                  }.
+-telemetry_event #{
+                   event => [cozodb, run, exception],
+                   description =>
+                    <<"Emitted when the CozoScript execution failed">>,
+                   measurements => <<"">>,
+                   metadata => <<"#{error => any()}">>
+                  }.
+
 %% =============================================================================
 %% API
 %% =============================================================================

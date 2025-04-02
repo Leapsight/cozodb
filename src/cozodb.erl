@@ -312,6 +312,7 @@ For more details, see the <a href="https://docs.cozodb.org/en/latest/vector.html
 -export_type([index_spec/0]).
 -export_type([info/0]).
 -export_type([query_result/0]).
+-export_type([query_return/0]).
 -export_type([relation_spec/0]).
 -export_type([row/0]).
 -export_type([script/0]).

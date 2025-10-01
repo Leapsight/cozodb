@@ -19,16 +19,17 @@
 // Rust std libs
 
 use core::hash::Hash;
-use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::hash::Hasher;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
 // Rustler
+use rustler::types::LocalPid;
 use rustler::Encoder;
 use rustler::Env;
 use rustler::ListIterator;
@@ -38,28 +39,23 @@ use rustler::NifResult;
 use rustler::OwnedEnv;
 use rustler::ResourceArc;
 use rustler::Term;
-use rustler::types::LocalPid;
-
 
 // Used for global state
 use lazy_static::lazy_static;
 
 // Used for CALLBACKS feature
+use crossbeam::channel::*;
 use once_cell::sync::Lazy;
 use threadpool::ThreadPool;
-use crossbeam::channel::*;
 
 // Cozo
 use cozo::*;
 use ndarray::Array1; // used by Array32Wrapper
 use serde_json::json;
 
-
 // =============================================================================
 // RUSTLER SETUP
 // =============================================================================
-
-
 
 // We define atoms in Rustler
 mod atoms {
@@ -112,7 +108,6 @@ rustler::init!("cozodb",
     load = on_load
 );
 
-
 /// Define NIF Resources using rustler::resource! macro
 fn on_load(env: Env, _: Term) -> bool {
     // rustler::resource!(DbHandle, env);
@@ -120,11 +115,9 @@ fn on_load(env: Env, _: Term) -> bool {
     true
 }
 
-
 // =============================================================================
 // STRUCTS REQUIRED FOR NIF
 // =============================================================================
-
 
 /// Struct used to globally manage database handles
 /// This is combined with lazy_static! macro to create a static variable
@@ -138,20 +131,18 @@ fn on_load(env: Env, _: Term) -> bool {
 /// long as any process in Erlang has the reference, Rust will keep the
 /// DBInstance alive.
 struct Handles {
-    current: AtomicI32, // thread safe counter
+    current: AtomicI32,                    // thread safe counter
     dbs: Mutex<BTreeMap<i32, DbInstance>>, // mapping of Id -> DbInstance handle
 }
-
 
 struct Registration {
     receiver: Receiver<(CallbackOp, NamedRows, NamedRows)>,
     relname: String,
-    pid: LocalPid
+    pid: LocalPid,
 }
 
 // id -> (channel, relname, pid)
 type Registrations = Arc<Mutex<HashMap<u32, Registration>>>;
-
 
 // Static variables are allocated for the duration of a program's run and are
 // not specific to any thread.
@@ -166,8 +157,7 @@ lazy_static! {
             // sets current to 0
             current: Default::default(),
             // empty BTreeMap guarded by mutex
-            dbs: Mutex::new(Default::default())
-        };
+            dbs: Mutex::new(Default::default())        };
 
     // Required for Callback feature.
     // We use THREAD_POOL to shard the callback handlers based on relation name.

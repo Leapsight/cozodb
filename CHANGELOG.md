@@ -1,5 +1,8 @@
 # CHANGELOG
 # 0.2.8
+* Fix error return types (broken with new cozo update in previous commit)
+
+# 0.2.8
 * Upgraded to latest version of forked cozo containing new temporal functions
 * Improved capture of Cozo errors
 

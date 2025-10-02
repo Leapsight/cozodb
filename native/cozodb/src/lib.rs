@@ -460,41 +460,19 @@ impl<'a> Encoder for Array64Wrapper {
 
 /// Convert a CozoDB error to a structured Erlang term
 /// CozoDB uses miette::Report for errors, which provides rich error information
-fn cozo_error_to_term<'a, E: std::fmt::Display + std::fmt::Debug>(env: Env<'a>, err: &E) -> Term<'a> {
+fn cozo_error_to_term<'a, E: std::fmt::Display + std::fmt::Debug>(
+    env: Env<'a>,
+    err: &E,
+) -> Term<'a> {
     let mut error_map = Term::map_new(env);
 
     // Use the alternate Display format which may include more error chain information
     // format!("{:#}") uses the alternate Display format
-
-    // Get the display message (user-friendly)
-    let display_message = err.to_string();
-
-    // Combine both: use display message as primary with debug as additional context
-    // This provides user-friendly text while preserving all structural information
-    let combined_message = if display_message.trim().is_empty() {
-        debug_message.clone()
-    } else {
     let message = format!("{:#}", err);
-    };
 
-    error_map = error_map.map_put(atoms::message(), combined_message).unwrap();
-
-    // Try to extract more details from the error string
-    // CozoDB errors often contain structured information in their display format
-    if display_message.contains("error:") {
-        // Extract the main error type if present
-        if let Some(idx) = display_message.find("error:") {
-            let error_type = display_message[..idx].trim();
-            if !error_type.is_empty() {
-                error_map = error_map.map_put(atoms::code(), error_type).unwrap();
-            }
-        }
-    }
-
-    // Check for common CozoDB error patterns
-    if display_message.contains("query") || display_message.contains("parse") {
-    error_map = error_map.map_put(atoms::message(), message.encode(env)).unwrap();
-    }
+    error_map = error_map
+        .map_put(atoms::message(), message.encode(env))
+        .unwrap();
 
     (atoms::error(), error_map).encode(env)
 }

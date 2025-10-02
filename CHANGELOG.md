@@ -1,5 +1,5 @@
 # CHANGELOG
-# 0.2.8
+# 0.2.9
 * Fix error return types (broken with new cozo update in previous commit)
 
 # 0.2.8

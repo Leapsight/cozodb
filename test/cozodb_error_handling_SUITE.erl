@@ -97,6 +97,7 @@ end_per_testcase(_TestCase, Config) ->
 %% TEST CASES
 %% =============================================================================
 
+
 invalid_syntax_error(Config) ->
     Db = ?config(db, Config),
     Query = "INVALID SYNTAX HERE",
@@ -344,28 +345,21 @@ duplicate_relation_error(Config) ->
     Db = ?config(db, Config),
 
     %% Create a relation
-    CreateQuery = ":create test_rel {a: Int}",
-    {ok, _} = cozodb:run(Db, CreateQuery),
+    R1 = #{keys => [<<"a">>], columns => [<<"b">>]},
+    ok = cozodb:create_relation(Db, <<"foo">>, R1),
 
     %% Try to create it again
-    {error, ErrorMap} = cozodb:run(Db, CreateQuery),
-
-    ct:log("Duplicate relation error: ~p", [ErrorMap]),
-
-    ?assert(is_map(ErrorMap)),
-    ?assertMatch(#{message := _}, ErrorMap),
-    Message = maps:get(message, ErrorMap),
-    ?assert(is_binary(Message)),
-
-    %% Should mention that relation conflicts or already exists
-    ?assert(
-        binary:match(Message, <<"already exists">>) =/= nomatch orelse
-        binary:match(Message, <<"same name">>) =/= nomatch orelse
-        binary:match(Message, <<"conflicts">>) =/= nomatch
+    ?assertEqual(
+        {error, #{message => already_exists}},
+        cozodb:create_relation(Db, <<"foo">>, R1)
     ),
-    ?assert(binary:match(Message, <<"test_rel">>) =/= nomatch),
 
-    ok.
+    R2 = #{keys => [<<"a">>], columns => [<<"b">>, <<"c">>]},
+
+    ?assertEqual(
+        {error, #{message => already_exists}},
+        cozodb:create_relation(Db, <<"foo">>, R2)
+    ).
 
 %% Test relation not found error
 relation_not_found_error(Config) ->

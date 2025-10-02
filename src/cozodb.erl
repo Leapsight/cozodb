@@ -1248,6 +1248,9 @@ new(Engine, Path, Opts) when
     end.
 
 %% @private
+format_error(#{message := Msg} = Map) ->
+    Map#{message => format_error(Msg)};
+
 format_error(<<"Running query is killed before completion">>) ->
     timeout;
 
@@ -1255,6 +1258,10 @@ format_error(Reason) ->
     Reason.
 
 %% @private
+
+format_error(Op, #{message := Msg} = Map) ->
+    Map#{message => format_error(Op, Msg)};
+
 format_error(Op, Reason) when is_binary(Reason) ->
     %% #{FUNCTION_NAME => [{MatchRule, Cozo string pattern, Return]}
     AllRules = #{

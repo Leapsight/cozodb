@@ -1,4 +1,8 @@
 # CHANGELOG
+# 0.2.8
+* Upgraded to latest version of forked cozo containing new temporal functions
+* Improved capture of Cozo errors
+
 # 0.2.7
 * Fix rust dep graph_builder compilation issue with latest rayon (pinned working versions)
 

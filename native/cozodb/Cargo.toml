@@ -1,6 +1,6 @@
 [package]
 name = "erlang-cozodb"
-description = "Erlang bindings for CozoDB"
+description = "Erlang NIF wrapper for CozoDB using Rustler."
 authors = ["Alejandro M. Ramallo"]
 version = "0.1.0"
 edition = "2021"

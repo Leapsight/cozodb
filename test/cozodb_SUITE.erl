@@ -1329,7 +1329,7 @@ param_float(Config) ->
         cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => 1.0}})
     ),
     ?assertMatch(
-        {ok, #{rows := [[0.0]]}},
+        {ok, #{rows := [[+0.0]]}},
         cozodb:run(Db, <<"?[x] := x = $a">>, #{parameters => #{<<"a">> => 0.0}})
     ),
     ?assertMatch(

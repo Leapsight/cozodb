@@ -19,16 +19,17 @@
 // Rust std libs
 
 use core::hash::Hash;
-use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::hash::Hasher;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
 // Rustler
+use rustler::types::LocalPid;
 use rustler::Encoder;
 use rustler::Env;
 use rustler::ListIterator;
@@ -38,28 +39,23 @@ use rustler::NifResult;
 use rustler::OwnedEnv;
 use rustler::ResourceArc;
 use rustler::Term;
-use rustler::types::LocalPid;
-
 
 // Used for global state
 use lazy_static::lazy_static;
 
 // Used for CALLBACKS feature
+use crossbeam::channel::*;
 use once_cell::sync::Lazy;
 use threadpool::ThreadPool;
-use crossbeam::channel::*;
 
 // Cozo
 use cozo::*;
 use ndarray::Array1; // used by Array32Wrapper
 use serde_json::json;
 
-
 // =============================================================================
 // RUSTLER SETUP
 // =============================================================================
-
-
 
 // We define atoms in Rustler
 mod atoms {
@@ -83,35 +79,40 @@ mod atoms {
         removed,
         cozodb,
         relation,
+        message,
+        code,
+        severity,
+        help,
+        url,
+        labels,
         // Error Reasons
         badarg,
         invalid_engine
     }
 }
 
-
 // Define erlang module and functions
-rustler::init!("cozodb",
+rustler::init!(
+    "cozodb",
     [
-      new,
-      close,
-      info,
-      resource,
-      run_script,
-      run_script_str,
-      run_script_json,
-      import_relations,
-      import_from_backup,
-      export_relations,
-      export_relations_json,
-      backup,
-      restore,
-      register_callback,
-      unregister_callback
+        new,
+        close,
+        info,
+        resource,
+        run_script,
+        run_script_str,
+        run_script_json,
+        import_relations,
+        import_from_backup,
+        export_relations,
+        export_relations_json,
+        backup,
+        restore,
+        register_callback,
+        unregister_callback
     ],
     load = on_load
 );
-
 
 /// Define NIF Resources using rustler::resource! macro
 fn on_load(env: Env, _: Term) -> bool {
@@ -120,11 +121,9 @@ fn on_load(env: Env, _: Term) -> bool {
     true
 }
 
-
 // =============================================================================
 // STRUCTS REQUIRED FOR NIF
 // =============================================================================
-
 
 /// Struct used to globally manage database handles
 /// This is combined with lazy_static! macro to create a static variable
@@ -138,20 +137,18 @@ fn on_load(env: Env, _: Term) -> bool {
 /// long as any process in Erlang has the reference, Rust will keep the
 /// DBInstance alive.
 struct Handles {
-    current: AtomicI32, // thread safe counter
+    current: AtomicI32,                    // thread safe counter
     dbs: Mutex<BTreeMap<i32, DbInstance>>, // mapping of Id -> DbInstance handle
 }
-
 
 struct Registration {
     receiver: Receiver<(CallbackOp, NamedRows, NamedRows)>,
     relname: String,
-    pid: LocalPid
+    pid: LocalPid,
 }
 
 // id -> (channel, relname, pid)
 type Registrations = Arc<Mutex<HashMap<u32, Registration>>>;
-
 
 // Static variables are allocated for the duration of a program's run and are
 // not specific to any thread.
@@ -223,14 +220,14 @@ lazy_static! {
 /// We use HANDLES to associate identifiers with Cozo's DbInstance Handles
 /// so that we can implement close().
 struct DbHandleResource {
-    db_instance: DbInstance
+    db_instance: DbInstance,
 }
 
 #[derive(NifMap)]
 struct DbHandle {
     db_id: i32,
     engine: String,
-    path: String
+    path: String,
 }
 
 /// Wrapper required to serialise Cozo's NamedRows value as Erlang map
@@ -239,21 +236,21 @@ struct NamedRowsWrapper<'a>(&'a NamedRows);
 impl<'a> Encoder for NamedRowsWrapper<'_> {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
         let headers = self.0.headers.encode(env);
-        let rows: Vec<Vec<DataValueWrapper>> =
-            self.0.rows
-                .clone()
-                .into_iter()
-                .map(|inner_vec|
-                    inner_vec.into_iter().map(DataValueWrapper).collect())
-                .collect();
+        let rows: Vec<Vec<DataValueWrapper>> = self
+            .0
+            .rows
+            .clone()
+            .into_iter()
+            .map(|inner_vec| inner_vec.into_iter().map(DataValueWrapper).collect())
+            .collect();
         let count = rows.len();
         let next = match &self.0.next {
             Some(more_ref) => {
                 // Dereference `more` before encoding
                 let more = &**more_ref;
                 NamedRowsWrapper(more).encode(env)
-            },
-            None => atoms::null().encode(env)
+            }
+            None => atoms::null().encode(env),
         };
 
         // Create and return an Erlang map with atom keys headers, rows and next
@@ -283,7 +280,6 @@ impl<'a> Encoder for BTreeMapWrapper {
     }
 }
 
-
 /// Wrapper required to serialise Cozo's DataValue value as Erlang Term
 struct DataValueWrapper(DataValue);
 
@@ -303,28 +299,26 @@ impl<'a> Encoder for DataValueWrapper {
                     .collect();
 
                 encoded_values.encode(env)
-            },
-            DataValue::Json(i) => {
-                match serde_json::to_string(&i) {
-                    Ok(json_str) =>
-                        (atoms::json(), json_str).encode(env),
-                    Err(_) =>
-                        "Failed to serialize JsonValue".encode(env),
-                }
             }
+            DataValue::Json(i) => match serde_json::to_string(&i) {
+                Ok(json_str) => (atoms::json(), json_str).encode(env),
+                Err(_) => "Failed to serialize JsonValue".encode(env),
+            },
             DataValue::Vec(i) => VectorWrapper(i.clone()).encode(env),
             DataValue::Validity(i) => {
-                let ts = i.timestamp.0.0.encode(env);
+                let ts = i.timestamp.0 .0.encode(env);
                 let assert = i.is_assert.0.encode(env);
                 // (float, bool)
                 (ts, assert).encode(env)
-            },
+            }
             DataValue::Regex(_) | DataValue::Set(_) | DataValue::Bot =>
-                // This types are only used internally so we shoul never receive
-                // one of this as a result of running a script, but we match
-                // them to avoid a compiler error.
-                // Just in case we do get them, we return the atom 'null'
+            // This types are only used internally so we shoul never receive
+            // one of this as a result of running a script, but we match
+            // them to avoid a compiler error.
+            // Just in case we do get them, we return the atom 'null'
+            {
                 atoms::null().encode(env)
+            }
         }
     }
 }
@@ -369,13 +363,12 @@ impl<'a> DataValueWrapper {
             // Collect the list into a vector to process multiple times
             let list_terms: Vec<Term<'a>> = list_iterator.collect();
 
-            let is_list_of_integers =
-                list_terms.iter().all(|t| t.decode::<i64>().is_ok());
+            let is_list_of_integers = list_terms.iter().all(|t| t.decode::<i64>().is_ok());
 
             if is_list_of_integers {
                 // Decode as a list of integers
-                let decoded_list: NifResult<Vec<DataValue>> =
-                    list_terms.iter()
+                let decoded_list: NifResult<Vec<DataValue>> = list_terms
+                    .iter()
                     .map(|term| {
                         let num = term.decode::<i64>()?;
                         Ok(DataValue::Num(cozo::Num::Int(num)))
@@ -384,11 +377,9 @@ impl<'a> DataValueWrapper {
                 return Ok(DataValueWrapper(DataValue::List(decoded_list?)));
             }
 
-            let decoded_list: NifResult<Vec<DataValue>> =
-                list_terms.iter()
-                .map(|term| DataValueWrapper::decode(*term).map(
-                    |wrapper| wrapper.0)
-                )
+            let decoded_list: NifResult<Vec<DataValue>> = list_terms
+                .iter()
+                .map(|term| DataValueWrapper::decode(*term).map(|wrapper| wrapper.0))
                 .collect();
             return Ok(DataValueWrapper(DataValue::List(decoded_list?)));
         }
@@ -408,11 +399,10 @@ impl<'a> DataValueWrapper {
 
         // TODO Handle validity
 
-
         // Default case for unrecognized or unsupported terms
-        Err(rustler::Error::Term(
-            Box::new("Unsupported Erlang term".to_string())
-        ))
+        Err(rustler::Error::Term(Box::new(
+            "Unsupported Erlang term".to_string(),
+        )))
     }
 }
 
@@ -425,7 +415,8 @@ impl<'a> Encoder for NumWrapper {
             Num::Int(i) => i.encode(env),
             Num::Float(f) => f.encode(env),
         }
-    }}
+    }
+}
 
 /// Wrapper required to serialise Cozo's Vector value as Erlang Term
 struct VectorWrapper(Vector);
@@ -440,7 +431,7 @@ impl<'a> Encoder for VectorWrapper {
 }
 
 /// Wrapper required to serialise Cozo's Array1<f32> value as Erlang Term
-struct Array32Wrapper(Array1<f32>);  // Used by Vector
+struct Array32Wrapper(Array1<f32>); // Used by Vector
 
 impl<'a> Encoder for Array32Wrapper {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
@@ -452,7 +443,7 @@ impl<'a> Encoder for Array32Wrapper {
 }
 
 /// Wrapper required to serialise Cozo's Array1<f64> value as Erlang Term
-struct Array64Wrapper(Array1<f64>);  // Used by Vector
+struct Array64Wrapper(Array1<f64>); // Used by Vector
 
 impl<'a> Encoder for Array64Wrapper {
     fn encode<'b>(&self, env: Env<'b>) -> Term<'b> {
@@ -463,42 +454,55 @@ impl<'a> Encoder for Array64Wrapper {
     }
 }
 
+// =============================================================================
+// ERROR HANDLING
+// =============================================================================
+
+/// Convert a CozoDB error to a structured Erlang term
+/// CozoDB uses miette::Report for errors, which provides rich error information
+fn cozo_error_to_term<'a, E: std::fmt::Display + std::fmt::Debug>(
+    env: Env<'a>,
+    err: &E,
+) -> Term<'a> {
+    let mut error_map = Term::map_new(env);
+
+    // Use the alternate Display format which may include more error chain information
+    // format!("{:#}") uses the alternate Display format
+    let message = format!("{:#}", err);
+
+    error_map = error_map
+        .map_put(atoms::message(), message.encode(env))
+        .unwrap();
+
+    (atoms::error(), error_map).encode(env)
+}
 
 // =============================================================================
 // OPERATIONS
 // =============================================================================
 
-
-
 /// Opens/creates a database returning an Erlang NIF Resource (reference).
-#[rustler::nif(schedule = "DirtyIo", name="new_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "new_nif")]
 
-fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
-    NifResult<Term<'a>> {
+fn new<'a>(env: Env<'a>, engine: String, path: String, options: &str) -> NifResult<Term<'a>> {
     // Validate engine name and obtain DBInstance
-    let result =
-        match engine.as_str() {
-            "mem" | "sqlite" | "rocksdb" =>
-                DbInstance::new_with_str(
-                    engine.as_str(), path.as_str(), options
-                ),
-            _ =>
-                return Err(rustler::Error::Term(
-                    Box::new(atoms::invalid_engine())
-                ))
-        };
+    let result = match engine.as_str() {
+        "mem" | "sqlite" | "rocksdb" => {
+            DbInstance::new_with_str(engine.as_str(), path.as_str(), options)
+        }
+        _ => return Err(rustler::Error::Term(Box::new(atoms::invalid_engine()))),
+    };
 
     // Validate we have a DBInstance and return error if not
-    let db =
-        match result {
-            Ok(db) => {
-                db
-            },
-            Err(err) =>
-                // TODO catch error and pritty format
-                // RocksDB error: IO error: lock hold by current process,
-                return Err(rustler::Error::Term(Box::new(err.to_string())))
-        };
+    let db = match result {
+        Ok(db) => db,
+        Err(err) =>
+        // TODO catch error and pritty format
+        // RocksDB error: IO error: lock hold by current process,
+        {
+            return Err(rustler::Error::Term(Box::new(format!("{:#?}", err))))
+        }
+    };
 
     // Store the DBInstance handle in a global hashmap using id as key
     let id = HANDLES.current.fetch_add(1, Ordering::AcqRel);
@@ -509,17 +513,14 @@ fn new<'a>(env: Env<'a>, engine: String, path: String, options:&str) ->
     let db_handle = DbHandle {
         db_id: id,
         engine: engine,
-        path: path
+        path: path,
     };
     Ok((atoms::ok().encode(env), db_handle).encode(env))
 }
 
+#[rustler::nif(schedule = "DirtyIo", name = "close_nif")]
 
-#[rustler::nif(schedule = "DirtyIo", name="close_nif")]
-
-fn close<'a>(env: Env<'a>, db_handle: Term<'a>) ->
-    NifResult<Term<'a>> {
-
+fn close<'a>(env: Env<'a>, db_handle: Term<'a>) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
     let db = {
@@ -529,92 +530,74 @@ fn close<'a>(env: Env<'a>, db_handle: Term<'a>) ->
     if db.is_some() {
         Ok(atoms::ok().encode(env))
     } else {
-        Err(rustler::Error::Term(
-            Box::new("Failed to close database".to_string())
-        ))
+        Err(rustler::Error::Term(Box::new(
+            "Failed to close database".to_string(),
+        )))
     }
 }
 
 /// Returns the metadata associated with the resource
-#[rustler::nif(schedule = "DirtyIo", name="info_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "info_nif")]
 
-fn info<'a>(env: Env<'a>, db_handle: Term<'a>) ->
-    NifResult<Term<'a>> {
+fn info<'a>(env: Env<'a>, db_handle: Term<'a>) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
     let mut map = rustler::types::map::map_new(env);
-    map = map.map_put(
-        atoms::engine().encode(env),
-        db_handle.engine.encode(env)
-    ).unwrap();
-    map = map.map_put(
-        atoms::path().encode(env),
-        db_handle.path.encode(env)
-    ).unwrap();
+    map = map
+        .map_put(atoms::engine().encode(env), db_handle.engine.encode(env))
+        .unwrap();
+    map = map
+        .map_put(atoms::path().encode(env), db_handle.path.encode(env))
+        .unwrap();
     Ok(map)
-
 }
-
 
 /// Returns the metadata associated with the resource
-#[rustler::nif(schedule = "DirtyIo", name="resource_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "resource_nif")]
 
-fn resource<'a>(env: Env<'a>, db_handle: Term<'a>) ->
-    NifResult<Term<'a>> {
+fn resource<'a>(env: Env<'a>, db_handle: Term<'a>) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     // Finally create and return a Nif Resource with the id and metadata
-    let resource = ResourceArc::new(DbHandleResource {
-        db_instance: db
-    });
+    let resource = ResourceArc::new(DbHandleResource { db_instance: db });
     Ok((atoms::ok().encode(env), resource.encode(env)).encode(env))
-
 }
 
-
 /// Returns the result of running script
-#[rustler::nif(schedule = "DirtyIo", name="run_script_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "run_script_nif")]
 
 fn run_script<'a>(
     env: Env<'a>,
     db_handle: Term<'a>,
     script: String,
     params: Term,
-    read_only: Term
-    ) -> NifResult<Term<'a>> {
-
+    read_only: Term,
+) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
-    let read_only =
-        if atoms::true_() == read_only {
-            ScriptMutability::Immutable
-        } else {
-            ScriptMutability::Mutable
-        };
+    let read_only = if atoms::true_() == read_only {
+        ScriptMutability::Immutable
+    } else {
+        ScriptMutability::Mutable
+    };
 
     // Convert the Erlang map to a BTreeMap using the helper function
     let btree = convert_to_btreemap(params)?;
@@ -629,87 +612,73 @@ fn run_script<'a>(
             let result = (atoms::ok(), map);
             Ok(result.encode(env))
         }
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        Err(err) => Ok(cozo_error_to_term(env, &err)),
     }
 }
 
 /// Sames as run_script but encodes as JSON
-#[rustler::nif(schedule = "DirtyIo", name="run_script_json_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "run_script_json_nif")]
 fn run_script_json<'a>(
     env: Env<'a>,
     db_handle: Term<'a>,
     script: String,
     params: String,
-    read_only: Term
-    ) -> NifResult<Term<'a>>  {
-
-    let db_handle: DbHandle = db_handle.decode()?;
-
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
-
-    let read_only =
-        if atoms::true_() == read_only {
-            ScriptMutability::Immutable
-        } else {
-            ScriptMutability::Mutable
-        };
-
-    let params_json =
-        match params_to_btree(&params) {
-            Ok(value) => value,
-            Err(err) => return Err(rustler::Error::Term(
-                Box::new(err.to_string())
-            ))
-        };
-
-    let result = db.run_script(
-        &script,
-        params_json,
-        read_only
-    ).unwrap();
-
-    let json = result.into_json();
-
-    match serde_json::to_string(&json) {
-        Ok(json_str) => {
-            let result = (atoms::ok().encode(env), json_str.encode(env));
-            Ok(result.encode(env))
-        }
-        Err(_) => Err(rustler::Error::Atom("json_encode_error"))
-    }
-}
-
-/// Run the CozoScript passed in folding any error into the returned JSON
-#[rustler::nif(schedule = "DirtyIo", name="run_script_str_nif")]
-fn run_script_str<'a>(
-    env: Env<'a>,
-    db_handle: Term<'a>,
-    script: String,
-    params: String,
-    read_only: Term
-    ) -> NifResult<Term<'a>>  {
-
+    read_only: Term,
+) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
     let db = match get_db(db_handle.db_id) {
         Some(db) => db,
         None => {
-            return Err(
-                rustler::Error::Term(
-                    Box::new("invalid reference".to_string())
-                )
-            )
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
+
+    let read_only = if atoms::true_() == read_only {
+        ScriptMutability::Immutable
+    } else {
+        ScriptMutability::Mutable
+    };
+
+    let params_json = match params_to_btree(&params) {
+        Ok(value) => value,
+        Err(err) => return Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
+    };
+
+    match db.run_script(&script, params_json, read_only) {
+        Ok(result) => {
+            let json = result.into_json();
+            match serde_json::to_string(&json) {
+                Ok(json_str) => {
+                    let result = (atoms::ok().encode(env), json_str.encode(env));
+                    Ok(result.encode(env))
+                }
+                Err(_) => Err(rustler::Error::Atom("json_encode_error")),
+            }
+        }
+        Err(err) => Ok(cozo_error_to_term(env, &err)),
+    }
+}
+
+/// Run the CozoScript passed in folding any error into the returned JSON
+#[rustler::nif(schedule = "DirtyIo", name = "run_script_str_nif")]
+fn run_script_str<'a>(
+    env: Env<'a>,
+    db_handle: Term<'a>,
+    script: String,
+    params: String,
+    read_only: Term,
+) -> NifResult<Term<'a>> {
+    let db_handle: DbHandle = db_handle.decode()?;
+
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
         }
     };
 
@@ -719,59 +688,48 @@ fn run_script_str<'a>(
     Ok(result.encode(env))
 }
 
-
 /// Imports relations
-#[rustler::nif(schedule = "DirtyIo", name="import_relations_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "import_relations_nif")]
 
-fn import_relations<'a>(
-    env: Env<'a>, db_handle: Term<'a>, data: String
-    ) -> NifResult<Term<'a>> {
-
+fn import_relations<'a>(env: Env<'a>, db_handle: Term<'a>, data: String) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     match db.import_relations_str_with_err(&data) {
-        Ok(()) =>
-            Ok(atoms::ok().encode(env)),
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        Ok(()) => Ok(atoms::ok().encode(env)),
+        Err(err) => Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
     }
 }
 
 // Exports relations defined by `relations`.
-#[rustler::nif(schedule = "DirtyIo", name="export_relations_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "export_relations_nif")]
 
 fn export_relations<'a>(
-    env: Env<'a>, db_handle: Term<'a>, relations: Vec<String>
-    ) -> NifResult<Term<'a>> {
-
+    env: Env<'a>,
+    db_handle: Term<'a>,
+    relations: Vec<String>,
+) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     match db.export_relations(relations.iter().map(|s| s as &str)) {
-        Ok(btreemap) =>{
+        Ok(btreemap) => {
             let mut data = rustler::types::map::map_new(env);
             for (key, value) in btreemap {
                 let key_term = key.encode(env);
@@ -779,163 +737,125 @@ fn export_relations<'a>(
                 data = data.map_put(key_term, value_term).unwrap();
             }
             Ok((atoms::ok().encode(env), data.encode(env)).encode(env))
-        },
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        }
+        Err(err) => Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
     }
-
 }
 
 /// Export relations as JSON
-#[rustler::nif(schedule = "DirtyIo", name="export_relations_json_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "export_relations_json_nif")]
 
 fn export_relations_json<'a>(
-    env: Env<'a>, db_handle: Term<'a>, relations: Vec<String>
-    ) -> NifResult<Term<'a>> {
-
+    env: Env<'a>,
+    db_handle: Term<'a>,
+    relations: Vec<String>,
+) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     match db.export_relations(relations.iter().map(|s| s as &str)) {
-        Ok(btreemap) =>{
+        Ok(btreemap) => {
             let data: Vec<_> = btreemap
                 .into_iter()
                 .map(|(k, v)| (k, v.into_json()))
                 .collect();
             let json = json!(data).to_string();
             Ok((atoms::ok().encode(env), json.encode(env)).encode(env))
-        },
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        }
+        Err(err) => Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
     }
 }
 
-
-
 /// Backs up the database at path
-#[rustler::nif(schedule = "DirtyIo", name="backup_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "backup_nif")]
 
-fn backup<'a>(env: Env<'a>, db_handle: Term<'a>, path: String
-    ) -> NifResult<Term<'a>> {
-
+fn backup<'a>(env: Env<'a>, db_handle: Term<'a>, path: String) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     match db.backup_db(path) {
-        Ok(()) => {
-            Ok(atoms::ok().encode(env))
-        }
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        Ok(()) => Ok(atoms::ok().encode(env)),
+        Err(err) => Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
     }
 }
 
 /// Backs up the database at path
-#[rustler::nif(schedule = "DirtyIo", name="restore_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "restore_nif")]
 
-fn restore<'a>(env: Env<'a>, db_handle: Term<'a>, path: String
-    ) -> NifResult<Term<'a>> {
-
+fn restore<'a>(env: Env<'a>, db_handle: Term<'a>, path: String) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     match db.restore_backup(path) {
-        Ok(()) => {
-            Ok(atoms::ok().encode(env))
-        }
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        Ok(()) => Ok(atoms::ok().encode(env)),
+        Err(err) => Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
     }
 }
 
 /// Backs up the database at path
-#[rustler::nif(schedule = "DirtyIo", name="import_from_backup_nif")]
+#[rustler::nif(schedule = "DirtyIo", name = "import_from_backup_nif")]
 
 fn import_from_backup<'a>(
     env: Env<'a>,
     db_handle: Term<'a>,
     path: String,
-    relations: Vec<String>
-    ) -> NifResult<Term<'a>> {
-
+    relations: Vec<String>,
+) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     match db.import_from_backup(path, &relations) {
-        Ok(()) => {
-            Ok(atoms::ok().encode(env))
-        }
-        Err(err) =>
-            Err(rustler::Error::Term(Box::new(err.to_string())))
+        Ok(()) => Ok(atoms::ok().encode(env)),
+        Err(err) => Err(rustler::Error::Term(Box::new(format!("{:#?}", err)))),
     }
 }
 
+#[rustler::nif(schedule = "DirtyCpu", name = "register_callback_nif")]
 
-#[rustler::nif(schedule = "DirtyCpu", name = "register_callback_nif",)]
-
-fn register_callback<'a>(
-    env: Env<'a>,
-    db_handle: Term<'a>,
-    rel: String) -> NifResult<Term<'a>>  {
-
+fn register_callback<'a>(env: Env<'a>, db_handle: Term<'a>, rel: String) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
     // Get db handle and fail is invalid
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     // Register the callback in cozodb
     let (reg_id, receiver) = db.register_callback(rel.as_str(), None);
@@ -947,9 +867,14 @@ fn register_callback<'a>(
     // Store receiver and PID in the global maps
     {
         let mut regs = REGISTRATIONS.lock().unwrap();
-        regs.insert(reg_id, Registration{
-            receiver: receiver, relname: rel.clone(), pid: local_pid
-        });
+        regs.insert(
+            reg_id,
+            Registration {
+                receiver: receiver,
+                relname: rel.clone(),
+                pid: local_pid,
+            },
+        );
     }
 
     // Distribute across threads in pool
@@ -971,28 +896,20 @@ fn register_callback<'a>(
     Ok((atoms::ok(), reg_id).encode(env))
 }
 
+#[rustler::nif(schedule = "DirtyCpu", name = "unregister_callback_nif")]
 
-#[rustler::nif(schedule = "DirtyCpu", name = "unregister_callback_nif",)]
-
-fn unregister_callback<'a>(
-    env: Env<'a>,
-    db_handle: Term<'a>,
-    reg_id: u32) -> NifResult<Term<'a>>  {
-
+fn unregister_callback<'a>(env: Env<'a>, db_handle: Term<'a>, reg_id: u32) -> NifResult<Term<'a>> {
     let db_handle: DbHandle = db_handle.decode()?;
 
     // Get db handle and fail is invalid
-    let db =
-        match get_db(db_handle.db_id) {
-            Some(db) => db,
-            None => {
-                return Err(
-                    rustler::Error::Term(
-                        Box::new("invalid reference".to_string())
-                    )
-                )
-            }
-        };
+    let db = match get_db(db_handle.db_id) {
+        Some(db) => db,
+        None => {
+            return Err(rustler::Error::Term(Box::new(
+                "invalid reference".to_string(),
+            )))
+        }
+    };
 
     let result: bool = db.unregister_callback(reg_id);
 
@@ -1005,20 +922,14 @@ fn unregister_callback<'a>(
     Ok(result.encode(env))
 }
 
-
-
-
 // =============================================================================
 // UTILS
 // =============================================================================
-
-
 
 fn get_db(db_id: i32) -> Option<DbInstance> {
     let dbs = HANDLES.dbs.lock().unwrap();
     dbs.get(&db_id).cloned()
 }
-
 
 // // Helper function to convert Erlang map to BTreeMap
 // fn convert_to_btreemap(map_term: Term) ->
@@ -1038,8 +949,7 @@ fn get_db(db_id: i32) -> Option<DbInstance> {
 
 // Helper function to convert Erlang map to BTreeMap
 // Atom keys are converted to strings
-fn convert_to_btreemap(map_term: Term) ->
-    NifResult<BTreeMap<String, DataValue>> {
+fn convert_to_btreemap(map_term: Term) -> NifResult<BTreeMap<String, DataValue>> {
     let map_iterator: MapIterator = map_term.decode()?;
 
     let mut btree: BTreeMap<String, DataValue> = BTreeMap::new();
@@ -1064,32 +974,29 @@ fn convert_to_btreemap(map_term: Term) ->
     Ok(btree)
 }
 
-fn params_to_btree(params: &String) ->
-    Result<BTreeMap<String, DataValue>, &'static str> {
+fn params_to_btree(params: &String) -> Result<BTreeMap<String, DataValue>, &'static str> {
     if params.is_empty() {
         Ok(BTreeMap::new()) // Wrap in Ok
     } else {
         match serde_json::from_str::<BTreeMap<String, DataValue>>(params) {
-            Ok(map) => Ok(
-                map.into_iter()
-                    .map(|(k, v)| (k, DataValue::from(v)))
-                    .collect()
-            ),
-            Err(_) => Err("params argument is not a JSON map")
+            Ok(map) => Ok(map
+                .into_iter()
+                .map(|(k, v)| (k, DataValue::from(v)))
+                .collect()),
+            Err(_) => Err("params argument is not a JSON map"),
         }
     }
 }
 
+fn worker_thread(registrations: Registrations, worker_count: usize, worker_index: usize) -> bool {
+    loop {
+        let registrations = registrations.lock().unwrap();
 
-fn worker_thread(
-    registrations: Registrations, worker_count: usize, worker_index: usize) -> bool {
-        loop {
-            let registrations = registrations.lock().unwrap();
-
-            // Filter receivers for this worker thread
-            for (&reg_id, registration) in registrations.iter() {
-                let rel = &registration.relname;
-                if should_handle(&rel, worker_count, worker_index) { {
+        // Filter receivers for this worker thread
+        for (&reg_id, registration) in registrations.iter() {
+            let rel = &registration.relname;
+            if should_handle(&rel, worker_count, worker_index) {
+                {
                     let receiver = &registration.receiver;
                     let pid = registration.pid;
                     for (op, new_rows, old_rows) in receiver.try_iter() {
@@ -1100,18 +1007,18 @@ fn worker_thread(
 
             // Sleep or yield the thread to prevent busy-waiting
             // std::thread::sleep(std::time::Duration::from_millis(100));
-            }
         }
     }
+}
 
 /// Returns true if relname hashes to the worker_index
 fn should_handle(relname: &String, worker_count: usize, worker_index: usize) -> bool {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        relname.hash(&mut hasher);
-        let hash = hasher.finish();
-        // let size : usize = *NUM_THREADS;
-        (hash % worker_count as u64) as usize == worker_index
-    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    relname.hash(&mut hasher);
+    let hash = hasher.finish();
+    // let size : usize = *NUM_THREADS;
+    (hash % worker_count as u64) as usize == worker_index
+}
 
 fn handle_event(
     rel: &String,
@@ -1119,39 +1026,29 @@ fn handle_event(
     new_rows: NamedRows,
     old_rows: NamedRows,
     reg_id: u32,
-    pid: LocalPid) {
+    pid: LocalPid,
+) {
     let _ = OwnedEnv::new().send_and_clear(&pid, |env| {
         let result: NifResult<Term> = (|| {
             let reg_id = reg_id.encode(env);
             let rel = rel.encode(env);
             let op = match op {
                 CallbackOp::Put => atoms::updated(),
-                CallbackOp::Rm => atoms::removed()
+                CallbackOp::Rm => atoms::removed(),
             };
-            let event_name = vec![
-                atoms::cozodb(),
-                atoms::relation(),
-                op
-            ];
+            let event_name = vec![atoms::cozodb(), atoms::relation(), op];
             let new_rows = NamedRowsWrapper(&new_rows).encode(env);
             let old_rows = NamedRowsWrapper(&old_rows).encode(env);
-            let event = (
-                event_name,
-                reg_id,
-                rel,
-                new_rows,
-                old_rows
-            );
+            let event = (event_name, reg_id, rel, new_rows, old_rows);
             Ok(event.encode(env))
         })();
 
         match result {
             Ok(term) => term,
-            Err(_err) => env.error_tuple("failed".encode(env))
+            Err(_err) => env.error_tuple("failed".encode(env)),
         }
     });
 }
-
 
 fn calculate_hash<T: Hash>(t: &T) -> u64 {
     let mut hasher = DefaultHasher::new();

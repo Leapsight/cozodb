@@ -68,3 +68,8 @@ test: eunit ct
 .PHONY: release
 release: xref
 	@$(REBAR3) as prod release
+
+
+.PHONY: update-cozo
+update-cozo:
+	cd native/cozodb && cargo update -p cozo

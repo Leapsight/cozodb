@@ -24,6 +24,12 @@ CozoDB is a FOSS embeddable, transactional, relational-graph-vector database, wi
   * `liburing2`
   * `pkg-config`
 
+## Upgrading `cozo` dependency
+```bash
+cd native/cozodb
+cargo update -p cozo
+```
+
 ### Erlang
 Add the following to your `rebar.config` file.
 

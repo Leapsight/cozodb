@@ -1,4 +1,7 @@
 # CHANGELOG
+# 0.3.10
+* Upgraded cozo libr with a fix to read-only transactions. They now use RocksDB snapshots to avoid issues with multithreading and locking.
+
 # 0.3.9
 * Added migration tool
 # 0.3.8

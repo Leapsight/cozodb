@@ -152,10 +152,24 @@ rustler::init!("cozodb", load = on_load);
 fn on_load(env: Env, _: Term) -> bool {
     rustler::resource!(DbHandleResource, env);
 
-    // Configure jemalloc: background threads, decay times, and optional arena limits
+    // Configure jemalloc: background threads, decay times, and optional arena
+    // limits
     // Only when jemalloc is the global allocator (not when using nif_alloc)
     #[cfg(all(feature = "jemalloc", not(feature = "nif_alloc"), not(target_env = "msvc")))]
     {
+        // Force jemalloc's global initialization (arena creation, pthread key
+        // setup)
+        // BEFORE configure_jemalloc() and before any dirty scheduler thread
+        // enters.
+        // This ensures the global state is fully set up when dirty schedulers
+        // later call warmup_jemalloc_tls() for per-thread TSD initialization.
+        unsafe {
+            let ptr = tikv_jemalloc_sys::malloc(1);
+            if !ptr.is_null() {
+                tikv_jemalloc_sys::free(ptr);
+            }
+        }
+
         configure_jemalloc();
     }
 
@@ -184,14 +198,23 @@ fn configure_jemalloc() {
     use std::env;
     use std::ffi::CString;
 
-    // Enable background thread for async purging (reduces latency impact of decay)
+    // Enable background thread for async purging (reduces latency impact of
+    // decay)
     // COZODB_JEMALLOC_BACKGROUND_THREAD: "true" (default) or "false"
+    // Default to false to match compile-time malloc_conf setting.
+    // background_thread:true causes segfaults in container environments (
+    // Docker, ECS, K8s)
+    // due to signal handling conflicts between jemalloc's background thread and
+    // the BEAM VM.
+    // Users can opt-in via COZODB_JEMALLOC_BACKGROUND_THREAD=true if not
+    // running in containers.
     let enable_bg_thread = env::var("COZODB_JEMALLOC_BACKGROUND_THREAD")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true);
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
 
     if enable_bg_thread {
-        // background_thread requires jemalloc compiled with --enable-background-thread
+        // background_thread requires jemalloc compiled with
+        // --enable-background-thread
         // It's optional - if not available, decay still works but synchronously
         unsafe {
             let key = CString::new("background_thread").unwrap();
@@ -211,7 +234,8 @@ fn configure_jemalloc() {
     }
 
     // Optionally limit the number of arenas to reduce memory overhead
-    // COZODB_JEMALLOC_NARENAS: number of arenas (default: jemalloc auto, typically 4*ncpus)
+    // COZODB_JEMALLOC_NARENAS: number of arenas (default: jemalloc auto,
+    // typically 4*ncpus)
     // Lower values (4-8) can reduce RSS spikes with many threads
     if let Ok(narenas_str) = env::var("COZODB_JEMALLOC_NARENAS") {
         if let Ok(narenas) = narenas_str.parse::<u32>() {
@@ -297,6 +321,63 @@ fn set_jemalloc_decay(dirty_decay_ms: i64, muzzy_decay_ms: i64) -> Result<(), St
 
     Ok(())
 }
+
+// =============================================================================
+// JEMALLOC PER-THREAD TLS WARMUP
+// =============================================================================
+//
+// When cozodb.so is loaded via dlopen (as Erlang does for NIFs), jemalloc's
+// thread-specific data (TSD) — including per-thread tcaches — is initialized
+// lazily on each thread's first allocation. With `disable_initial_exec_tls`,
+// jemalloc uses pthread_getspecific for TSD, which requires proper pthread key
+// setup.
+//
+// On BEAM dirty IO scheduler threads (configured with -SDio 256), the first
+// NIF call triggers jemalloc TSD initialization concurrently across many
+// threads.
+// If this happens during a heavy allocation path (e.g., RocksDB open/recovery),
+// the TSD may not be fully initialized before jemalloc's internal structures
+// are accessed, causing SIGSEGV in _rjem_je_free_default or
+// _rjem_je_tcache_bin_flush_small.
+//
+// The fix: force a small malloc+free on each thread BEFORE any heavy work.
+// This ensures jemalloc's TSD, tcache, and arena binding are fully initialized
+// in a controlled context.
+// =============================================================================
+
+#[cfg(all(feature = "jemalloc", not(feature = "nif_alloc"), not(target_env = "msvc")))]
+thread_local! {
+    static JEMALLOC_TLS_WARM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Force jemalloc TSD initialization for the current thread.
+///
+/// Must be called at the entry of every dirty-scheduled NIF function to prevent
+/// SIGSEGV during RocksDB operations on BEAM dirty IO/CPU scheduler threads.
+/// After the first call per thread, this is effectively a no-op (single TLS read).
+#[cfg(all(feature = "jemalloc", not(feature = "nif_alloc"), not(target_env = "msvc")))]
+#[inline]
+fn warmup_jemalloc_tls() {
+    JEMALLOC_TLS_WARM.with(|warm| {
+        if !warm.get() {
+            // Small alloc+free through jemalloc forces full TSD initialization:
+            // pthread key lookup, tcache creation, arena binding.
+            // Both prefixed (_rjem_je_*) and unprefixed (malloc/free) APIs share
+            // the same TSD, so warming up via either path covers both.
+            unsafe {
+                let ptr = tikv_jemalloc_sys::malloc(1);
+                if !ptr.is_null() {
+                    tikv_jemalloc_sys::free(ptr);
+                }
+            }
+            warm.set(true);
+        }
+    });
+}
+
+#[cfg(not(all(feature = "jemalloc", not(feature = "nif_alloc"), not(target_env = "msvc"))))]
+#[inline]
+fn warmup_jemalloc_tls() {}
 
 // =============================================================================
 // STRUCTS REQUIRED FOR NIF
@@ -478,7 +559,8 @@ fn encode_data_value_ref<'b>(env: Env<'b>, value: &DataValue) -> Term<'b> {
         DataValue::Bytes(i) => i.as_slice().encode(env),
         DataValue::Uuid(w) => w.0.hyphenated().to_string().encode(env),
         DataValue::List(i) => {
-            // OPTIMIZED: Build Erlang list directly without intermediate Vec<Term>
+            // OPTIMIZED: Build Erlang list directly without
+            // intermediate Vec<Term>
             let mut terms: Vec<ERL_NIF_TERM> = Vec::with_capacity(i.len());
             for val in i.iter() {
                 terms.push(encode_data_value_ref(env, val).as_c_arg());
@@ -704,6 +786,7 @@ fn open_res_with_options<'a>(
     path: String,
     options: String,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     // Validate engine name and obtain DBInstance
     // Supported engines:
     //   - "mem": In-memory storage (no persistence)
@@ -743,6 +826,7 @@ fn run_script_res<'a>(
     params: Term,
     read_only: Term,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     let read_only = if atoms::true_() == read_only {
@@ -778,6 +862,7 @@ fn run_script_str_res<'a>(
     params: String,
     read_only: Term,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     let read_only = atoms::true_() == read_only;
@@ -795,6 +880,7 @@ fn run_script_json_res<'a>(
     params: String,
     read_only: Term,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     let read_only = if atoms::true_() == read_only {
@@ -830,6 +916,7 @@ fn import_relations_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     data: String,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.import_relations_str_with_err(&data) {
@@ -845,6 +932,7 @@ fn export_relations_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     relations: Vec<String>,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.export_relations(relations.iter().map(|s| s as &str)) {
@@ -868,6 +956,7 @@ fn export_relations_json_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     relations: Vec<String>,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.export_relations(relations.iter().map(|s| s as &str)) {
@@ -890,6 +979,7 @@ fn backup_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     path: String,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.backup_db(path) {
@@ -905,6 +995,7 @@ fn restore_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     path: String,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.restore_backup(path) {
@@ -921,6 +1012,7 @@ fn import_from_backup_res<'a>(
     path: String,
     relations: Vec<String>,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.import_from_backup(path, &relations) {
@@ -936,6 +1028,7 @@ fn register_callback_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     rel: String,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     // Register the callback in cozodb
@@ -981,6 +1074,7 @@ fn unregister_callback_res<'a>(
     db_res: ResourceArc<DbHandleResource>,
     reg_id: u32,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     let result: bool = db.unregister_callback(reg_id);
@@ -1000,6 +1094,7 @@ fn flush_memtables_res<'a>(
     env: Env<'a>,
     db_res: ResourceArc<DbHandleResource>,
 ) -> NifResult<Term<'a>> {
+    warmup_jemalloc_tls();
     let db = &db_res.db_instance;
 
     match db.flush() {

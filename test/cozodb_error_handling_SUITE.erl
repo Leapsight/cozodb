@@ -97,7 +97,6 @@ end_per_testcase(_TestCase, Config) ->
 %% TEST CASES
 %% =============================================================================
 
-
 invalid_syntax_error(Config) ->
     Db = ?config(db, Config),
     Query = "INVALID SYNTAX HERE",
@@ -147,8 +146,10 @@ type_mismatch_error(Config) ->
     ct:log("Type mismatch error: ~p", [ErrorMap]),
 
     %% Check that it's an evaluation error
-    ?assert(binary:match(Message, <<"Evaluation">>) =/= nomatch orelse
-            binary:match(Message, <<"evaluation">>) =/= nomatch),
+    ?assert(
+        binary:match(Message, <<"Evaluation">>) =/= nomatch orelse
+            binary:match(Message, <<"evaluation">>) =/= nomatch
+    ),
     ok.
 
 invalid_function_error(Config) ->
@@ -181,13 +182,16 @@ unbound_variable_error(Config) ->
     ct:log("Unbound variable error: ~p", [ErrorMap]),
 
     %% Check that it mentions unbound variable
-    ?assert(binary:match(Message, <<"unbound">>) =/= nomatch orelse
-            binary:match(Message, <<"Atom">>) =/= nomatch),
+    ?assert(
+        binary:match(Message, <<"unbound">>) =/= nomatch orelse
+            binary:match(Message, <<"Atom">>) =/= nomatch
+    ),
     ok.
 
 parse_error_with_position(Config) ->
     Db = ?config(db, Config),
-    Query = "?[x :=",  %% Incomplete query
+    %% Incomplete query
+    Query = "?[x :=",
 
     {error, ErrorMap} = cozodb:run(Db, Query),
 
@@ -198,8 +202,10 @@ parse_error_with_position(Config) ->
     ct:log("Parse error with position: ~p", [ErrorMap]),
 
     %% Check that the error mentions position or unexpected end
-    ?assert(binary:match(Message, <<"unexpected">>) =/= nomatch orelse
-            binary:match(Message, <<"parser">>) =/= nomatch),
+    ?assert(
+        binary:match(Message, <<"unexpected">>) =/= nomatch orelse
+            binary:match(Message, <<"parser">>) =/= nomatch
+    ),
     ok.
 
 multiple_errors_in_script(Config) ->
@@ -243,21 +249,24 @@ error_fields_structure(Config) ->
 
     %% Check optional fields if present
     case maps:get(severity, ErrorMap, undefined) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Severity ->
             ?assert(is_binary(Severity)),
             ct:log("Severity: ~p", [Severity])
     end,
 
     case maps:get(code, ErrorMap, undefined) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Code ->
             ?assert(is_binary(Code)),
             ct:log("Code: ~p", [Code])
     end,
 
     case maps:get(help, ErrorMap, undefined) of
-        undefined -> ok;
+        undefined ->
+            ok;
         Help ->
             ?assert(is_binary(Help)),
             ct:log("Help: ~p", [Help])
@@ -425,8 +434,8 @@ data_coercion_error(Config) ->
     %% Should mention type or coercion
     ?assert(
         binary:match(Message, <<"type">>) =/= nomatch orelse
-        binary:match(Message, <<"coercion">>) =/= nomatch orelse
-        binary:match(Message, <<"Int">>) =/= nomatch
+            binary:match(Message, <<"coercion">>) =/= nomatch orelse
+            binary:match(Message, <<"Int">>) =/= nomatch
     ),
 
     ok.
@@ -453,8 +462,8 @@ null_value_error(Config) ->
     %% Should mention null or type
     ?assert(
         binary:match(Message, <<"null">>) =/= nomatch orelse
-        binary:match(Message, <<"Null">>) =/= nomatch orelse
-        binary:match(Message, <<"type">>) =/= nomatch
+            binary:match(Message, <<"Null">>) =/= nomatch orelse
+            binary:match(Message, <<"type">>) =/= nomatch
     ),
 
     ok.
@@ -477,8 +486,8 @@ aggregation_not_found_error(Config) ->
     %% Should mention aggregation or function name
     ?assert(
         binary:match(Message, <<"nonexistent_agg">>) =/= nomatch orelse
-        binary:match(Message, <<"aggregation">>) =/= nomatch orelse
-        binary:match(Message, <<"Aggregation">>) =/= nomatch
+            binary:match(Message, <<"aggregation">>) =/= nomatch orelse
+            binary:match(Message, <<"Aggregation">>) =/= nomatch
     ),
 
     ok.
@@ -505,8 +514,8 @@ unsafe_negation_error(Config) ->
     %% Should mention negation or unbound
     ?assert(
         binary:match(Message, <<"negation">>) =/= nomatch orelse
-        binary:match(Message, <<"unbound">>) =/= nomatch orelse
-        binary:match(Message, <<"unsafe">>) =/= nomatch
+            binary:match(Message, <<"unbound">>) =/= nomatch orelse
+            binary:match(Message, <<"unsafe">>) =/= nomatch
     ),
 
     ok.
@@ -529,7 +538,7 @@ constant_rule_arity_mismatch(Config) ->
     %% Should mention arity
     ?assert(
         binary:match(Message, <<"arity">>) =/= nomatch orelse
-        binary:match(Message, <<"Arity">>) =/= nomatch
+            binary:match(Message, <<"Arity">>) =/= nomatch
     ),
 
     ok.
@@ -552,8 +561,8 @@ imperative_on_permanent_relation(Config) ->
     %% Should mention the algorithm/rule name or "not found"
     ?assert(
         binary:match(Message, <<"NonExistentAlgorithm">>) =/= nomatch orelse
-        binary:match(Message, <<"not found">>) =/= nomatch orelse
-        binary:match(Message, <<"cannot">>) =/= nomatch
+            binary:match(Message, <<"not found">>) =/= nomatch orelse
+            binary:match(Message, <<"cannot">>) =/= nomatch
     ),
 
     ok.

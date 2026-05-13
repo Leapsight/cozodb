@@ -702,7 +702,7 @@ defmodule CozodbBenchmark do
     id = :rand.uniform(config.seed_rows)
     query = "?[id, value, counter, data] := *#{table}{id, value, counter, data}, id = $id"
 
-    case :cozodb.run(db, query, %{parameters: %{"id" => id}}) do
+    case :cozodb.run(db, query, %{parameters: %{"id" => id}, read_only: true}) do
       {:ok, _} -> :ok
       {:error, %{message: msg}} -> {:error, classify_error(msg)}
       {:error, reason} -> {:error, inspect(reason)}
@@ -735,6 +735,7 @@ defmodule CozodbBenchmark do
 
   defp classify_error(msg) when is_binary(msg) do
     cond do
+      String.contains?(msg, "Timeout waiting to lock key") -> :lock_timeout
       String.contains?(msg, "Resource busy") -> :resource_busy
       String.contains?(msg, "database is locked") -> :database_locked
       String.contains?(msg, "timeout") -> :timeout

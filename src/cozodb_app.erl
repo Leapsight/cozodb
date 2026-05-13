@@ -16,7 +16,6 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 -module(cozodb_app).
 
 -behaviour(application).

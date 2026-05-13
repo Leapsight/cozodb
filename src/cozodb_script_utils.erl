@@ -55,19 +55,15 @@ Encodes a relation specification map into a CozoScript–formatted iolist.
 
 encode_relation_spec(#{keys := [], columns := []}) ->
     error({badarg, "invalid specification"});
-
 encode_relation_spec(Map) when is_map(Map), not is_map_key(keys, Map) ->
     encode_relation_spec(Map#{keys => []});
-
 encode_relation_spec(Map) when is_map(Map), not is_map_key(columns, Map) ->
     encode_relation_spec(Map#{columns => []});
-
 encode_relation_spec(#{keys := Keys, columns := Cols}) ->
     EncodedKeys =
         case encode_relation_columns(Keys) of
             [] ->
                 [];
-
             L ->
                 L ++ [$\s, $=, $>]
         end,
@@ -75,7 +71,6 @@ encode_relation_spec(#{keys := Keys, columns := Cols}) ->
     EncodedCols = encode_relation_columns(Cols),
 
     [${, EncodedKeys, EncodedCols, $\s, $}];
-
 encode_relation_spec(_) ->
     error({badarg, "invalid specification"}).
 
@@ -121,7 +116,6 @@ encode_index_spec(#{type := covering, fields := Fields0}) when Fields0 =/= [] ->
                 "Valid values are list, binary or atom",
             error({badarg, Message})
     end;
-
 encode_index_spec(
     #{
         type := hnsw,
@@ -132,10 +126,8 @@ encode_index_spec(
     } = Spec
 ) ->
     do_encode_index_spec(Spec);
-
 encode_index_spec(#{type := fts, extractor := _, tokenizer := _} = Spec) ->
     do_encode_index_spec(Spec);
-
 encode_index_spec(
     #{
         type := lsh,
@@ -147,7 +139,6 @@ encode_index_spec(
     } = Spec
 ) ->
     do_encode_index_spec(Spec);
-
 encode_index_spec(_) ->
     error({badarg, "invalid specification"}).
 
@@ -174,7 +165,6 @@ specification is a tuple of the form `{Event, Script}`. Supported events include
 encode_triggers_spec([]) ->
     %% Valid case when deleting triggers
     [];
-
 encode_triggers_spec(Specs) ->
     L = [encode_trigger_spec(Spec) || Spec <- Specs],
     lists:join("\n", L).
@@ -205,34 +195,24 @@ Converts a given term into a CozoScript–compatible string representation using
 """.
 to_cozo_string(undefined, _) ->
     <<"Null">>;
-
 to_cozo_string(nil, _) ->
     <<"Null">>;
-
 to_cozo_string(null, _) ->
     <<"Null">>;
-
 to_cozo_string(Val, _) when is_integer(Val) ->
     integer_to_binary(Val);
-
 to_cozo_string(Val, _) when is_float(Val) ->
     list_to_binary(io_lib_format:fwrite_g(Val));
-
 to_cozo_string({var, X}, _) when is_binary(X) ->
     X;
-
 to_cozo_string(Val, single) when is_binary(Val) ->
     <<"'", Val/binary, "'">>;
-
 to_cozo_string(Val, raw) when is_binary(Val) ->
     <<"___\"", Val/binary, "\"___">>;
-
 to_cozo_string(Val, single) when is_atom(Val) ->
     <<"'", (atom_to_binary(Val, utf8))/binary, "'">>;
-
 to_cozo_string(Val, raw) when is_atom(Val) ->
     <<"___\"", (atom_to_binary(Val, utf8))/binary, "\"___">>;
-
 to_cozo_string(Values, Type) when is_list(Values) ->
     iolist_to_binary([
         <<"[">>,
@@ -254,25 +234,20 @@ to_cozo_string(Values, Type) when is_list(Values) ->
 %% -----------------------------------------------------------------------------
 encode_relation_columns([]) ->
     [];
-
 encode_relation_columns(Spec) when is_list(Spec) ->
     Res = lists:foldl(
         fun
             F({Col, Type}, Acc) when is_atom(Col) ->
                 F({atom_to_binary(Col), Type}, Acc);
-
             F({Col, Type}, Acc) when is_list(Col) ->
                 F({list_to_binary(Col), Type}, Acc);
-
             F({Col, undefined}, Acc) when is_binary(Col) ->
                 [[$\s, Col] | Acc];
-
             F({Col, Type}, Acc) when
                 is_binary(Col) andalso (is_atom(Type) orelse is_tuple(Type))
             ->
                 Encoded = encode_column_type(Type),
                 [[$\s, Col, $:, $\s, Encoded] | Acc];
-
             F({Col, #{type := Type} = ColSpec}, Acc) when is_binary(Col) ->
                 Encoded = encode_column_type(Type),
                 DefaultNullable =
@@ -281,27 +256,26 @@ encode_relation_columns(Spec) when is_list(Spec) ->
                             case maps:get(nullable, ColSpec, false) of
                                 true ->
                                     $?;
-
                                 false ->
                                     <<>>
                             end;
-
-                        Val when Type == string;
-                         Type == uuid ->
+                        Val when
+                            Type == string;
+                            Type == uuid
+                        ->
                             to_cozo_string(Val);
-
                         Val ->
                             [<<" default ">>, value_to_binary(Val)]
                     end,
 
                 [[$\s, Col, $:, $\s, Encoded, DefaultNullable] | Acc];
-
-            F(Col, Acc) when is_atom(Col);
-             is_list(Col);
-             is_binary(Col) ->
+            F(Col, Acc) when
+                is_atom(Col);
+                is_list(Col);
+                is_binary(Col)
+            ->
                 %% A column name without type, we coerse to tuple
                 F({Col, undefined}, Acc);
-
             F(Term, _) ->
                 M = io:format("invalid column type specification '~p'", [Term]),
                 error({badarg, M})
@@ -310,7 +284,6 @@ encode_relation_columns(Spec) when is_list(Spec) ->
         Spec
     ),
     lists:reverse(lists:join($,, Res));
-
 encode_relation_columns(_Spec) ->
     error({badarg, "invalid specification"}).
 
@@ -319,23 +292,20 @@ encode_relation_columns(_Spec) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-value_to_binary(Val) when Val == null;
- Val == nil;
- Val == undefined ->
+value_to_binary(Val) when
+    Val == null;
+    Val == nil;
+    Val == undefined
+->
     <<"Null">>;
-
 value_to_binary(Val) when is_atom(Val) ->
     atom_to_binary(Val);
-
 value_to_binary(Val) when is_list(Val) ->
     list_to_binary(Val);
-
 value_to_binary(Val) when is_float(Val) ->
     float_to_binary(Val, [{decimals, 4}, compact]);
-
 value_to_binary(Val) when is_integer(Val) ->
     integer_to_binary(Val);
-
 value_to_binary(Val) when is_binary(Val) ->
     Val.
 
@@ -346,51 +316,50 @@ value_to_binary(Val) when is_binary(Val) ->
 %% -----------------------------------------------------------------------------
 encode_column_type(undefined) ->
     <<>>;
-
 encode_column_type(any) ->
     <<"Any">>;
-
 encode_column_type(bool) ->
     <<"Bool">>;
-
 encode_column_type(bytes) ->
     <<"Bytes">>;
-
 encode_column_type(json) ->
     <<"Json">>;
-
 encode_column_type(int) ->
     <<"Int">>;
-
 encode_column_type(float) ->
     <<"Float">>;
-
 encode_column_type(string) ->
     <<"String">>;
-
 encode_column_type(uuid) ->
     <<"Uuid">>;
-
 encode_column_type(validity) ->
     <<"Validity">>;
-
 encode_column_type({list, Type}) ->
     [$[, encode_column_type(Type), $]];
-
 encode_column_type({list, Type, Size}) when is_integer(Size) ->
-    [$[, encode_column_type(Type), $;
-    , $\s, integer_to_binary(Size), $]];
-
+    [
+        $[,
+        encode_column_type(Type),
+        $;,
+        $\s,
+        integer_to_binary(Size),
+        $]
+    ];
 encode_column_type({tuple, Types}) when is_list(Types) ->
     Encoded = [encode_column_type(Type) || Type <- Types],
     [$(, lists:join($,, Encoded), $)];
-
 encode_column_type({vector, N, Size}) when
     (N == 32 orelse N == 64) andalso is_integer(Size)
 ->
-    [$<, $F, integer_to_list(N), $;
-    , $\s, integer_to_list(Size), $>];
-
+    [
+        $<,
+        $F,
+        integer_to_list(N),
+        $;,
+        $\s,
+        integer_to_list(Size),
+        $>
+    ];
 encode_column_type(Term) ->
     M = io:format("invalid column type '~p'", [Term]),
     error({badarg, M}).
@@ -402,11 +371,11 @@ encode_fields(Fields) ->
 %% @private
 term_to_field(Term) when is_atom(Term) ->
     atom_to_list(Term);
-
-term_to_field(Term) when is_list(Term);
- is_binary(Term) ->
+term_to_field(Term) when
+    is_list(Term);
+    is_binary(Term)
+->
     Term;
-
 term_to_field(_) ->
     error(badarg).
 
@@ -420,7 +389,6 @@ do_encode_index_spec(#{type := T} = Spec) ->
         (type, _, Acc) ->
             %% Ignore
             Acc;
-
         (K, Term, Acc) ->
             [encode_index_entry(T, K, Term) | Acc]
     end,
@@ -441,127 +409,109 @@ encode_index_entry(hnsw, K, N) when
         is_integer(N) andalso N > 0
 ->
     <<(atom_to_binary(K))/binary, ": ", (integer_to_binary(N))/binary>>;
-
-encode_index_entry(hnsw, K, _) when K == dim;
- K == m;
- K == ef_construction ->
+encode_index_entry(hnsw, K, _) when
+    K == dim;
+    K == m;
+    K == ef_construction
+->
     Cause = lists:flatten(
         io_lib:format("value for key '~p' is not a positive integer", [K])
     ),
     error({badarg, Cause});
-
 encode_index_entry(hnsw, dtype, f32) ->
     <<"dtype: F32">>;
-
 encode_index_entry(hnsw, dtype, f64) ->
     <<"dtype: F64">>;
-
 encode_index_entry(hnsw, dtype, _) ->
     error({badarg, "invalid value for key 'dtype'"});
-
 encode_index_entry(hnsw, fields, Fields) when is_list(Fields) ->
     Encoded = encode_fields(Fields),
     ["fields: [", Encoded, "]"];
-
 encode_index_entry(hnsw, fields, _) ->
     error({badarg, "invalid value for key 'fields'"});
-
 encode_index_entry(hnsw, distance, l2) ->
     <<"distance: L2">>;
-
 encode_index_entry(hnsw, distance, cosine) ->
     <<"distance: Cosine">>;
-
 encode_index_entry(hnsw, distance, ip) ->
     <<"distance: IP">>;
-
 encode_index_entry(hnsw, distance, _) ->
     error({badarg, "invalid value for key 'distance'"});
-
 encode_index_entry(hnsw, filter, Expr) when is_list(Expr) ->
     encode_index_entry(hnsw, filter, list_to_binary(Expr));
-
 encode_index_entry(hnsw, filter, Expr) when is_binary(Expr) ->
     <<"filter: ", Expr/binary>>;
-
 encode_index_entry(hnsw, filter, _) ->
     error({badarg, "invalid value for key 'filter'"});
-
 encode_index_entry(hnsw, extend_candidates, Val) when is_boolean(Val) ->
     <<"extend_candidates: ", (atom_to_binary(Val))/binary>>;
-
 encode_index_entry(hnsw, extend_candidates, _) ->
     error({badarg, "invalid value for key 'extend_candidates'"});
-
 encode_index_entry(hnsw, keep_pruned_connections, Val) when is_boolean(Val) ->
     <<"keep_pruned_connections: ", (atom_to_binary(Val))/binary>>;
-
 encode_index_entry(hnsw, keep_pruned_connections, _) ->
     error({badarg, "invalid value for key 'keep_pruned_connections'"});
-
 encode_index_entry(Type, extractor, Col) when is_list(Col) ->
     encode_index_entry(Type, extractor, list_to_binary(Col));
-
 encode_index_entry(Type, extractor, Col) when is_atom(Col) ->
     encode_index_entry(Type, extractor, atom_to_binary(Col));
-
 encode_index_entry(Type, extractor, Col) when
     (Type == lsh orelse Type == fts) andalso is_binary(Col)
 ->
     <<"extractor: ", Col/binary>>;
-
-encode_index_entry(Type, extractor, _) when Type == lsh;
- Type == fts ->
+encode_index_entry(Type, extractor, _) when
+    Type == lsh;
+    Type == fts
+->
     error({badarg, "invalid value for key 'extractor'"});
-
 encode_index_entry(Type, extract_filter, Expr) when is_list(Expr) ->
     encode_index_entry(Type, extract_filter, list_to_binary(Expr));
-
 encode_index_entry(Type, extract_filter, Expr) when
     (Type == lsh orelse Type == fts) andalso is_binary(Expr)
 ->
     <<"extract_filter: ", Expr/binary>>;
-
-encode_index_entry(Type, extract_filter, _) when Type == lsh;
- Type == fts ->
+encode_index_entry(Type, extract_filter, _) when
+    Type == lsh;
+    Type == fts
+->
     error({badarg, "invalid value for key 'extract_filter'"});
-
-encode_index_entry(Type, tokenizer, Tokenizer) when Type == lsh;
- Type == fts ->
+encode_index_entry(Type, tokenizer, Tokenizer) when
+    Type == lsh;
+    Type == fts
+->
     Encoded = encode_index_tokenizer(Tokenizer),
     <<"tokenizer: ", Encoded/binary>>;
-
-encode_index_entry(Type, tokenizer, _) when Type == lsh;
- Type == fts ->
+encode_index_entry(Type, tokenizer, _) when
+    Type == lsh;
+    Type == fts
+->
     error({badarg, "invalid value for key 'tokenizer'"});
-
 encode_index_entry(Type, filters, Filters) when
     (Type == lsh orelse Type == fts) andalso is_list(Filters)
 ->
     case encode_index_filters(Filters) of
         [] ->
             [];
-
         Encoded ->
             ["filters: [", Encoded, "]"]
     end;
-
-encode_index_entry(Type, filters, _) when Type == lsh;
- Type == fts ->
+encode_index_entry(Type, filters, _) when
+    Type == lsh;
+    Type == fts
+->
     error({badarg, "invalid value for key 'filters'"});
-
 encode_index_entry(lsh, K, N) when
     (K == n_perm orelse K == n_gram) andalso is_integer(N) andalso N > 0
 ->
     <<(atom_to_binary(K))/binary, ": ", (integer_to_binary(N))/binary>>;
-
-encode_index_entry(lsh, K, _) when K == n_perm;
- K == n_gram ->
+encode_index_entry(lsh, K, _) when
+    K == n_perm;
+    K == n_gram
+->
     Cause = lists:flatten(
         io_lib:format("value for key '~p' is not a positive integer", [K])
     ),
     error({badarg, Cause});
-
 encode_index_entry(lsh, K, N) when
     (K == target_threshold orelse
         K == false_positive_weight orelse
@@ -573,7 +523,6 @@ encode_index_entry(lsh, K, N) when
         ": ",
         (float_to_binary(N, [{decimals, 4}, compact]))/binary
     >>;
-
 encode_index_entry(lsh, K, _) when
     K == target_threshold orelse
         K == false_positive_weight orelse
@@ -583,7 +532,6 @@ encode_index_entry(lsh, K, _) when
         io_lib:format("value for key '~p' is not a positive float", [K])
     ),
     error({badarg, Cause});
-
 encode_index_entry(_, K, _) ->
     Cause = io_lib:format("unknown key '~s'", [K]),
     error({badarg, Cause}).
@@ -596,16 +544,12 @@ encode_index_entry(_, K, _) ->
 
 encode_index_tokenizer(raw) ->
     <<"Raw">>;
-
 encode_index_tokenizer(simple) ->
     <<"Simple">>;
-
 encode_index_tokenizer(whitespace) ->
     <<"Whitespace">>;
-
 encode_index_tokenizer(ngram) ->
     encode_index_tokenizer({ngram, 1, 1, false});
-
 encode_index_tokenizer({ngram, Min, Max, PrefixOnly}) when
     is_integer(Min), is_integer(Max), is_boolean(PrefixOnly)
 ->
@@ -620,15 +564,13 @@ encode_index_tokenizer({ngram, Min, Max, PrefixOnly}) when
         (atom_to_binary(PrefixOnly))/binary,
         ")"
     >>;
-
 encode_index_tokenizer({cangjie, Kind}) when
     Kind == all;
-     Kind == default;
-     Kind == search;
-     Kind == unicode
+    Kind == default;
+    Kind == search;
+    Kind == unicode
 ->
     <<"Cangjie(", (atom_to_binary(Kind))/binary, ")">>;
-
 encode_index_tokenizer(_) ->
     error({badarg, "invalid tokenizer"}).
 
@@ -639,7 +581,6 @@ encode_index_tokenizer(_) ->
 %% -----------------------------------------------------------------------------
 encode_index_filters([]) ->
     [];
-
 encode_index_filters(Filters) ->
     lists:join(", ", [encode_index_filter(F) || F <- Filters]).
 
@@ -650,25 +591,18 @@ encode_index_filters(Filters) ->
 %% -----------------------------------------------------------------------------
 encode_index_filter(lowercase) ->
     <<"Lowercase">>;
-
 encode_index_filter(alphanumonly) ->
     <<"AlphaNumOnly">>;
-
 encode_index_filter(asciifolding) ->
     <<"AsciiFolding">>;
-
 encode_index_filter({stemmer, Lang}) when is_list(Lang) ->
     encode_index_filter({stemmer, list_to_binary(Lang)});
-
 encode_index_filter({stemmer, Lang}) when is_binary(Lang) ->
     <<"Stemmer('", Lang/binary, "')">>;
-
 encode_index_filter({stopwords, Lang}) when is_list(Lang) ->
     encode_index_filter({stopwords, list_to_binary(Lang)});
-
 encode_index_filter({stopwords, Lang}) when is_binary(Lang) ->
     <<"Stopwords('", Lang/binary, "')">>;
-
 encode_index_filter(_) ->
     error({badarg, "on or more values for filters are invalid"}).
 
@@ -679,22 +613,19 @@ encode_index_filter(_) ->
 %% -----------------------------------------------------------------------------
 encode_trigger_spec({on_put, Script}) when
     is_list(Script);
-     is_binary(Script)
+    is_binary(Script)
 ->
     [<<"on put">>, $\s, ${, $\s, Script, $\s, $}];
-
 encode_trigger_spec({on_rm, Script}) when
     is_list(Script);
-     is_binary(Script)
+    is_binary(Script)
 ->
     [<<"on rm">>, $\s, ${, $\s, Script, $\s, $}];
-
 encode_trigger_spec({on_replace, Script}) when
     is_list(Script);
-     is_binary(Script)
+    is_binary(Script)
 ->
     [<<"on replace">>, $\s, ${, $\s, Script, $\s, $}];
-
 encode_trigger_spec({on_remove, Script}) ->
     %% util
     encode_trigger_spec({on_rm, Script}).

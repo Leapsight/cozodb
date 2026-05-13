@@ -2,7 +2,7 @@
 name = "erlang-cozodb"
 description = "Erlang NIF wrapper for CozoDB using Rustler."
 authors = ["Alejandro M. Ramallo"]
-version = "0.3.5"
+version = "0.3.10"
 edition = "2021"
 
 [lib]
@@ -12,8 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustler = {version = "=0.37.0", features = ["nif_version_2_17"]}
-# Using local path temporarily to test new memory stats functionality
-cozo = {git = "https://github.com/aramallo/cozo.git", tag = "v0.8.5-leapsight" }
+cozo = {git = "https://github.com/aramallo/cozo.git", tag = "v0.8.8-leapsight" }
 uuid = "1.3.3"
 threadpool = "1.8.1"
 once_cell = "1.21.3"
@@ -94,16 +93,24 @@ new-rocksdb = ["cozo/storage-new-rocksdb"]
 # RocksDB (C++) still uses its own memory management, but jemalloc is optional.
 nif_alloc = []
 
-# Use jemalloc as the global allocator for the entire process.
+# Use jemalloc as the global allocator for Rust and RocksDB C++ allocations.
 # This enables:
 # 1. Rust NIF allocations go through jemalloc (via #[global_allocator])
 # 2. RocksDB C++ allocations also use jemalloc (via cozo/rocksdb-jemalloc feature)
 # 3. Unified memory statistics and purge capabilities
 #
+# IMPORTANT: cozo/rocksdb-jemalloc enables `unprefixed_malloc_on_supported_platforms`
+# in cozorocks, which defines `malloc`/`free` inside cozodb.so. Rust's cdylib linker
+# (-Bsymbolic-non-weak-functions + version script with `local: *;`) binds these
+# symbols locally, meaning ALL free() calls from C++ code within cozodb.so go to
+# jemalloc — even for pointers allocated by glibc (e.g., via getline()).
+# This is safe ONLY because the cozo fork patches RocksDB's
+# GetQueueSysfsFileValueOfFd() to use fgets() instead of getline(), eliminating
+# the cross-allocator free that caused SIGSEGV in _rjem_je_free_default.
+# See: cozorocks/rocksdb/env/io_posix.cc
+#
 # Note: When both nif_alloc and jemalloc are enabled, nif_alloc takes precedence
 # and jemalloc is only used for RocksDB (C++).
-#
-# For pure jemalloc mode: --no-default-features --features "cozo/storage-sqlite,cozo/storage-rocksdb,cozo/graph-algo,jemalloc"
 jemalloc = ["tikv-jemallocator", "tikv-jemalloc-ctl", "tikv-jemalloc-sys", "cozo/rocksdb-jemalloc"]
 
 # Hybrid mode: Erlang allocator for Rust + jemalloc for RocksDB

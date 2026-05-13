@@ -196,7 +196,6 @@ interval(_Config) ->
     % open a new database
     {ok, Db} = cozodb:open(),
 
-
     {ok, #{rows := Rows}} = cozodb:run(Db, """
         data[x, y] <- [[1,2], [2,3], [4,5]]
         ?[z, len, contains] :=
@@ -216,4 +215,3 @@ interval(_Config) ->
     ),
     % close an already closed database
     ok = cozodb:close(Db).
-

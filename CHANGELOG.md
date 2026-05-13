@@ -1,4 +1,30 @@
 # CHANGELOG
+# 0.3.10
+* Upgraded cozo libr with a fix to read-only transactions. They now use RocksDB snapshots to avoid issues with multithreading and locking.
+
+# 0.3.9
+* Added migration tool
+# 0.3.8
+* Upgraded cozo dependency to v0.8.7-leapsight
+
+# 0.3.7
+
+## Bug Fixes
+* **Fixed cross-allocator SIGSEGV during RocksDB Open in containers (Docker, ECS, K8s).** Root cause: `cozo/rocksdb-jemalloc` enables `unprefixed_malloc_on_supported_platforms` in cozorocks, which defines `malloc`/`free` as LOCAL symbols inside `cozodb.so`. Rust 1.73+ adds `-Bsymbolic-non-weak-functions` when linking cdylib crates, binding all C++ `free()` calls to jemalloc's `free` — even when the pointer was allocated by glibc (e.g., via `getline()` in `rocksdb::PosixHelper::GetQueueSysfsFileValueOfFd()`). This cross-allocator mismatch crashed in `_rjem_je_free_default`. Fixed in the cozo fork (v0.8.6-leapsight) by patching `cozorocks/build.rs` to replace `getline()+free()` with `fgets()` using a stack buffer in `io_posix.cc` at build time — RocksDB C++ continues to use jemalloc for memory management (critical for preventing 15GB+ memory growth under load).
+* Added eager per-thread jemalloc TLS warmup in all dirty-scheduled NIF functions and global warmup in `on_load` (defense-in-depth for jemalloc TSD initialization on BEAM dirty IO scheduler threads).
+* Fixed `COZODB_JEMALLOC_BACKGROUND_THREAD` runtime default contradicting the compile-time `malloc_conf` setting. The runtime `configure_jemalloc()` was overriding `background_thread:false` (baked in at compile time) back to `true`, causing signal handling conflicts with the BEAM VM in containers. Default is now `false`; opt-in via `COZODB_JEMALLOC_BACKGROUND_THREAD=true`.
+
+## Improvements
+* Benchmark Dockerfile (`benchmark/Dockerfile`) rewritten to realistically simulate a consumer application that depends on cozodb — uses `mix deps.get && mix compile` which triggers the full rebar3 pre_hooks chain automatically, instead of manual `make cargo-build` and `.so` copying.
+* Added `benchmark/Dockerfile.wellos` as a reference production multi-stage Dockerfile with:
+  - Compile-time jemalloc env vars (`JEMALLOC_SYS_WITH_MALLOC_CONF`, `JEMALLOC_SYS_WITH_LG_PAGE`, `CXXFLAGS`) correctly placed in the build stage
+  - Conditional `liburing` support via `COZODB_IO_URING` build arg (defaults to `false`)
+  - Runtime-only packages in the runner stage (no `-dev` headers)
+  - Removed unnecessary runtime dependencies (`libsodium`, `libsnappy`, `liblz4`, `liburing`) — all statically linked into their respective NIFs
+
+# 0.3.6
+* Change NIF `COZODB_JEMALLOC_BACKGROUND_THREAD` to `false` by default inline with COZO's side
+
 # 0.3.5
 * Update to cozo v0.8.4-leapsight making `options` file the priority
 # 0.3.4

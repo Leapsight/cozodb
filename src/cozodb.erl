@@ -469,37 +469,34 @@ COZODB_JEMALLOC_NARENAS=8 rebar3 shell
 
 -on_load(init/0).
 
-
-
-
 %% =============================================================================
 %% TELEMETRY_REGISTRY DECLARATIONS
 %% =============================================================================
 
--telemetry_event #{
-                   event => [cozodb, run, start],
-                   description =>
-                    <<"Emitted at the start of the CozoScript execution">>,
-                   measurements => <<
-                   "#{system_time => non_neg_integer(), "
-                   "monotonic_time => non_neg_integer()}"
-                   >>,
-                   metadata => <<"#{}">>
-                  }.
--telemetry_event #{
-                   event => [cozodb, run, stop],
-                   description =>
-                    <<"Emitted at the end of the CozoScript execution">>,
-                   measurements => <<"#{duration => non_neg_integer()}">>,
-                   metadata => <<"#{}">>
-                  }.
--telemetry_event #{
-                   event => [cozodb, run, exception],
-                   description =>
-                    <<"Emitted when the CozoScript execution failed">>,
-                   measurements => <<"">>,
-                   metadata => <<"#{error => any()}">>
-                  }.
+-telemetry_event(#{
+    event => [cozodb, run, start],
+    description =>
+        <<"Emitted at the start of the CozoScript execution">>,
+    measurements => <<
+        "#{system_time => non_neg_integer(), "
+        "monotonic_time => non_neg_integer()}"
+    >>,
+    metadata => <<"#{}">>
+}).
+-telemetry_event(#{
+    event => [cozodb, run, stop],
+    description =>
+        <<"Emitted at the end of the CozoScript execution">>,
+    measurements => <<"#{duration => non_neg_integer()}">>,
+    metadata => <<"#{}">>
+}).
+-telemetry_event(#{
+    event => [cozodb, run, exception],
+    description =>
+        <<"Emitted when the CozoScript execution failed">>,
+    measurements => <<"">>,
+    metadata => <<"#{error => any()}">>
+}).
 
 %% =============================================================================
 %% API
@@ -631,7 +628,6 @@ os:putenv("COZO_ROCKSDB_COMPRESSION_TYPE", "lz4"),
 
 open(Engine, Path, Opts) when is_list(Path), Path =/= [], is_map(Opts) ->
     open(Engine, list_to_binary(Path), Opts);
-
 open(Engine, Path, Opts) when
     is_atom(Engine), is_binary(Path), is_map(Opts)
 ->
@@ -676,15 +672,15 @@ info(DbHandle) when ?IS_DB_HANDLE(DbHandle) ->
 -spec run(DbHandle :: db_handle(), Script :: script()) ->
     query_return() | no_return().
 
-run(DbHandle, Script) when Script == "";
- Script == <<>> ->
+run(DbHandle, Script) when
+    Script == "";
+    Script == <<>>
+->
     ?ERROR(badarg, [DbHandle, Script], #{
         1 => "script cannot be empty"
     });
-
 run(DbHandle, Script) when is_list(Script) ->
     run(DbHandle, list_to_binary(Script));
-
 run(DbHandle, Script) when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
     ReadOnly = false,
     Meta = #{script => Script, db_handle => DbHandle, options => #{}},
@@ -699,21 +695,18 @@ run(DbHandle, Script) when ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) ->
 
 run(DbHandle, Script, Opts) when is_list(Script) ->
     run(DbHandle, list_to_binary(Script), Opts);
-
 run(DbHandle, Script, #{encoding := json} = Opts) when
     ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script)
 ->
     Params = term_to_json_object(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_json_res_nif(?GET_RESOURCE(DbHandle), Script, Params, ReadOnly);
-
 run(DbHandle, Script, #{encoding := map} = Opts) when
     ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script)
 ->
     Params = term_to_json_object(maps:get(parameters, Opts, #{})),
     ReadOnly = maps:get(read_only, Opts, false),
     run_script_str_res_nif(?GET_RESOURCE(DbHandle), Script, Params, ReadOnly);
-
 run(DbHandle, Script, Opts) when
     ?IS_DB_HANDLE(DbHandle) andalso is_binary(Script) andalso is_map(Opts)
 ->
@@ -759,12 +752,10 @@ import(DbHandle, Relations) when
     ?IS_DB_HANDLE(DbHandle) andalso is_map(Relations)
 ->
     import(DbHandle, term_to_json_object(Relations));
-
 import(DbHandle, Relations) when
     ?IS_DB_HANDLE(DbHandle) andalso is_binary(Relations)
 ->
     import_relations_res_nif(?GET_RESOURCE(DbHandle), Relations);
-
 import(DbHandle, Relations) when
     ?IS_DB_HANDLE(DbHandle) andalso is_list(Relations)
 ->
@@ -780,7 +771,7 @@ containing the `headers` and `rows` of the relation.
 -spec export(
     DbHandle :: db_handle(), RelNames :: [relation_name()] | binary()
 ) ->
-    ok | {error, Reason :: any()}.
+    {ok, relations() | binary()} | {error, Reason :: any()}.
 
 export(DbHandle, RelNames) ->
     export(DbHandle, RelNames, #{}).
@@ -803,12 +794,10 @@ export(DbHandle, RelNames, #{encoding := json}) when
     ?IS_DB_HANDLE(DbHandle) andalso is_binary(RelNames)
 ->
     export_relations_json_res_nif(?GET_RESOURCE(DbHandle), RelNames);
-
 export(DbHandle, RelNames, #{encoding := json}) when
     ?IS_DB_HANDLE(DbHandle) andalso is_list(RelNames)
 ->
     export_relations_json_res_nif(?GET_RESOURCE(DbHandle), RelNames);
-
 export(DbHandle, RelNames, _) when
     ?IS_DB_HANDLE(DbHandle) andalso is_list(RelNames)
 ->
@@ -823,7 +812,6 @@ To restore the database using this file see {@link restore/2}.
 
 backup(DbHandle, Path) when is_list(Path), Path =/= [] ->
     backup(DbHandle, list_to_binary(Path));
-
 backup(DbHandle, Path) when ?IS_DB_HANDLE(DbHandle), is_binary(Path) ->
     backup_res_nif(?GET_RESOURCE(DbHandle), Path).
 
@@ -835,7 +823,6 @@ backup(DbHandle, Path) when ?IS_DB_HANDLE(DbHandle), is_binary(Path) ->
 
 restore(DbHandle, Path) when is_list(Path), Path =/= [] ->
     restore(DbHandle, list_to_binary(Path));
-
 restore(DbHandle, Path) when ?IS_DB_HANDLE(DbHandle), is_binary(Path) ->
     restore_res_nif(?GET_RESOURCE(DbHandle), Path).
 
@@ -849,7 +836,6 @@ restore(DbHandle, Path) when ?IS_DB_HANDLE(DbHandle), is_binary(Path) ->
 
 import_from_backup(DbHandle, Path, Relations) when is_list(Path), Path =/= [] ->
     import_from_backup(DbHandle, list_to_binary(Path), Relations);
-
 import_from_backup(DbHandle, Path, Relations) when
     ?IS_DB_HANDLE(DbHandle), is_binary(Path), is_list(Relations)
 ->
@@ -879,10 +865,8 @@ relations(DbHandle) ->
 
 create_relation(DbHandle, RelName, Spec) when is_atom(RelName) ->
     create_relation(DbHandle, atom_to_binary(RelName), Spec);
-
 create_relation(DbHandle, RelName, Spec) when is_list(RelName) ->
     create_relation(DbHandle, list_to_binary(RelName), Spec);
-
 create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) ->
     Encoded =
         try
@@ -897,7 +881,6 @@ create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) -
     case run(DbHandle, iolist_to_binary(Query)) of
         {ok, _} ->
             ok;
-
         {error, Reason} ->
             {error, format_error(?FUNCTION_NAME, Reason)}
     end.
@@ -906,16 +889,14 @@ create_relation(DbHandle, RelName, Spec) when is_binary(RelName), is_map(Spec) -
 Removes a relation
 """.
 -spec remove_relation(DbHandle :: db_handle(), RelName :: binary() | string()) ->
-    query_return().
+    ok | {error, Reason :: any()}.
 
 remove_relation(DbHandle, RelName) when is_list(RelName) ->
     remove_relation(DbHandle, list_to_binary(RelName));
-
 remove_relation(DbHandle, RelName) when is_binary(RelName) ->
     case run(DbHandle, <<"::remove", $\s, RelName/binary>>) of
         {ok, _} ->
             ok;
-
         {error, Reason} ->
             {error, format_error(?FUNCTION_NAME, Reason)}
     end.
@@ -931,7 +912,6 @@ remove_relations(DbHandle, RelNames0) ->
     case run(DbHandle, <<"::remove", $\s, RelNames/binary>>) of
         {ok, _} ->
             ok;
-
         {error, _} = Error ->
             Error
     end.
@@ -947,10 +927,8 @@ Create index for relation
 
 describe(DbHandle, RelName, Desc) when is_list(RelName) ->
     describe(DbHandle, list_to_binary(RelName), Desc);
-
 describe(DbHandle, RelName, Desc) when is_list(Desc) ->
     describe(DbHandle, RelName, list_to_binary(Desc));
-
 describe(DbHandle, RelName, Desc) ->
     Cmd = <<"::describe", $\s, RelName/binary, $\s, Desc/binary, "?">>,
     run(DbHandle, Cmd).
@@ -963,7 +941,6 @@ List columns for relation
 
 columns(DbHandle, RelName) when is_list(RelName) ->
     columns(DbHandle, list_to_binary(RelName));
-
 columns(DbHandle, RelName) ->
     run(DbHandle, <<"::columns", $\s, RelName/binary>>).
 
@@ -975,7 +952,6 @@ List indices for relation
 
 indices(DbHandle, RelName) when is_list(RelName) ->
     indices(DbHandle, list_to_binary(RelName));
-
 indices(DbHandle, RelName) ->
     run(DbHandle, <<"::indices", $\s, RelName/binary>>).
 
@@ -1041,11 +1017,9 @@ create_index(DbHandle, RelName, Name, #{type := Type} = Spec0) when
     case run(DbHandle, Query) of
         {ok, _} ->
             ok;
-
         {error, Reason} ->
             {error, format_error(?FUNCTION_NAME, Reason)}
     end;
-
 create_index(DbHandle, RelName, Name, Spec) ->
     ?ERROR(badarg, [DbHandle, RelName, Name, Spec], #{
         4 =>
@@ -1061,13 +1035,11 @@ Drop index with fully qualified name.
 
 drop_index(DbHandle, FQN) when is_list(FQN) ->
     drop_index(DbHandle, list_to_binary(FQN));
-
 drop_index(DbHandle, FQN) when is_binary(FQN) ->
     Cmd = <<"::index drop", $\s, FQN/binary>>,
     case run(DbHandle, Cmd) of
         {ok, _} ->
             ok;
-
         {error, Reason} ->
             {error, format_error(?FUNCTION_NAME, Reason)}
     end.
@@ -1079,14 +1051,12 @@ Create index for relation
     DbHandle :: db_handle(),
     RelName :: binary() | list(),
     Name :: binary() | list()
-) -> query_return().
+) -> ok | {error, Reason :: any()}.
 
 drop_index(DbHandle, RelName, Name) when is_list(RelName) ->
     drop_index(DbHandle, list_to_binary(RelName), Name);
-
 drop_index(DbHandle, RelName, Name) when is_list(Name) ->
     drop_index(DbHandle, RelName, list_to_binary(Name));
-
 drop_index(DbHandle, RelName, Name) when is_binary(RelName), is_binary(Name) ->
     drop_index(DbHandle, <<RelName/binary, ":", Name/binary>>).
 
@@ -1098,7 +1068,6 @@ Returns the list of triggers.
 
 triggers(DbHandle, RelName) when is_list(RelName) ->
     triggers(DbHandle, list_to_binary(RelName));
-
 triggers(DbHandle, RelName) ->
     run(DbHandle, <<"::show_triggers", $\s, RelName/binary>>).
 
@@ -1113,7 +1082,6 @@ triggers(DbHandle, RelName) ->
 
 set_triggers(DbHandle, RelName, Spec) when is_list(RelName) ->
     set_triggers(DbHandle, list_to_binary(RelName), Spec);
-
 set_triggers(DbHandle, RelName, Spec) when is_binary(RelName), is_list(Spec) ->
     Triggers = cozodb_script_utils:encode_triggers_spec(Spec),
     Cmd = iolist_to_binary([
@@ -1138,7 +1106,6 @@ delete_triggers(DbHandle, RelName) ->
 
 register_callback(DbHandle, RelName) when is_list(RelName) ->
     register_callback(DbHandle, list_to_binary(RelName));
-
 register_callback(DbHandle, RelName) when
     ?IS_DB_HANDLE(DbHandle) andalso is_binary(RelName)
 ->
@@ -1149,7 +1116,6 @@ register_callback(DbHandle, RelName) when
 """.
 -spec unregister_callback(DbHandle :: db_handle(), Id :: integer()) ->
     boolean().
-
 
 unregister_callback(DbHandle, Id) when
     ?IS_DB_HANDLE(DbHandle) andalso is_integer(Id)
@@ -1191,7 +1157,6 @@ compact(Dbhandle) ->
     case run(Dbhandle, <<"::compact">>) of
         {ok, _} ->
             ok;
-
         {error, _} = Error ->
             Error
     end.
@@ -1247,7 +1212,6 @@ Returns `{error, not_rocksdb}` for non-RocksDB storage backends.
 rocksdb_memory_stats(DbHandle) when ?IS_DB_HANDLE(DbHandle) ->
     rocksdb_memory_stats_res_nif(?GET_RESOURCE(DbHandle)).
 
-
 -doc """
 Dump a jemalloc heap profile to the specified file path.
 
@@ -1271,10 +1235,8 @@ Returns:
 
 dump_heap_profile(Path) when is_list(Path) ->
     dump_heap_profile(list_to_binary(Path));
-
 dump_heap_profile(Path) when is_binary(Path) ->
     dump_heap_profile_nif(Path).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc Clear all entries from the shared RocksDB block cache.
@@ -1300,7 +1262,6 @@ structure intact. New reads will repopulate the cache as needed.
 clear_block_cache() ->
     clear_block_cache_nif().
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Set the capacity of the shared RocksDB block cache in MB.
 %%
@@ -1325,7 +1286,6 @@ the current usage will trigger eviction of excess entries.
 set_block_cache_capacity(CapacityMB) when is_integer(CapacityMB), CapacityMB >= 0 ->
     set_block_cache_capacity_nif(CapacityMB).
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Get statistics about the shared RocksDB block cache.
 %%
@@ -1349,7 +1309,6 @@ Returns `{ok, Stats}` where Stats is a map containing:
 
 get_block_cache_stats() ->
     get_block_cache_stats_nif().
-
 
 %% -----------------------------------------------------------------------------
 %% @doc Force jemalloc to return unused memory to the operating system.
@@ -1429,7 +1388,6 @@ Returns:
 get_jemalloc_decay() ->
     get_jemalloc_decay_nif().
 
-
 %% =============================================================================
 %% API: Utils
 %% =============================================================================
@@ -1442,7 +1400,6 @@ get_jemalloc_decay() ->
 
 explain(DbHandle, Query) when is_list(Query) ->
     explain(DbHandle, list_to_binary(Query));
-
 explain(DbHandle, Query) when is_binary(Query) ->
     run(DbHandle, <<"::explain", ${, $\s, Query/binary, $\s, $}>>).
 
@@ -1485,14 +1442,12 @@ run_script_span(DbHandle, Script, Params, ReadOnly, Meta) when
     is_list(Params)
 ->
     run_script_span(DbHandle, Script, maps:from_list(Params), ReadOnly, Meta);
-
 run_script_span(DbHandle, Script, Params, ReadOnly, Meta) when is_map(Params) ->
     Resource = ?GET_RESOURCE(DbHandle),
     telemetry:span([cozodb, run], Meta, fun() ->
         case run_script_res_nif(Resource, Script, Params, ReadOnly) of
             {ok, _} = OK ->
                 {OK, Meta};
-
             {error, Reason} ->
                 Formatted = format_error(Reason),
                 Error = {error, Formatted},
@@ -1627,7 +1582,9 @@ restore_res_nif(_Resource, _Path) ->
     ?NIF_NOT_LOADED.
 
 %% @private
--spec import_from_backup_res_nif(Resource :: reference(), Path :: binary(), Relations :: [binary()]) ->
+-spec import_from_backup_res_nif(
+    Resource :: reference(), Path :: binary(), Relations :: [binary()]
+) ->
     ok | {error, Reason :: any()}.
 
 import_from_backup_res_nif(_Resource, _Path, _Relations) ->
@@ -1692,10 +1649,8 @@ new(Engine, Path, Opts) when
 %% @private
 format_error(#{message := Msg} = Map) ->
     Map#{message => format_error(Msg)};
-
 format_error(<<"Running query is killed before completion">>) ->
     timeout;
-
 format_error(Reason) ->
     Reason.
 
@@ -1703,7 +1658,6 @@ format_error(Reason) ->
 
 format_error(Op, #{message := Msg} = Map) ->
     Map#{message => format_error(Op, Msg)};
-
 format_error(Op, Reason) when is_binary(Reason) ->
     %% #{FUNCTION_NAME => [{MatchRule, Cozo string pattern, Return]}
     AllRules = #{
@@ -1723,11 +1677,9 @@ format_error(Op, Reason) when is_binary(Reason) ->
         ({match_suffix, Pattern, _Format}) ->
             Suffix = binary:longest_common_suffix([Reason, Pattern]),
             Suffix == byte_size(Pattern);
-
         ({match_prefix, Pattern, _Format}) ->
             Suffix = binary:longest_common_prefix([Reason, Pattern]),
             Suffix == byte_size(Pattern);
-
         (_) ->
             false
     end,
@@ -1740,36 +1692,27 @@ format_error(Op, Reason) when is_binary(Reason) ->
     case lists:search(Pred, OpRules) of
         {value, {_, _, Return}} ->
             Return;
-
         false ->
             Reason
     end;
-
 format_error(_, Reason) ->
     Reason.
 
 %% @private
 engine_opts(mem) ->
     #{};
-
 engine_opts(sqlite) ->
     application:get_env(?APP, sqlite_options, #{});
-
 engine_opts(rocksdb) ->
     application:get_env(?APP, rocksdb_options, #{});
-
 engine_opts(_Other) ->
     #{}.
 
 %% @private
 index_type_op(covering) -> <<"index">>;
-
 index_type_op(fts) -> <<"fts">>;
-
 index_type_op(hnsw) -> <<"hnsw">>;
-
 index_type_op(lsh) -> <<"lsh">>;
-
 index_type_op(_) -> error(badarg).
 
 %% @private
@@ -1778,7 +1721,6 @@ index_type_op(_) -> error(badarg).
 
 term_to_json_object(Term) when is_list(Term) ->
     term_to_json_object(maps:from_list(Term));
-
 term_to_json_object(Term) when is_map(Term) ->
     try
         iolist_to_binary(json:encode(Term))
@@ -1790,7 +1732,6 @@ term_to_json_object(Term) when is_map(Term) ->
                         lists:flatten(
                             io_lib:format("invalid JSON key '~p'", [Key])
                         );
-
                     _ ->
                         "json encoding failed"
                 end,

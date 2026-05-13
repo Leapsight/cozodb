@@ -16,7 +16,6 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 -module(cozodb_callback_monitor).
 -moduledoc """
 A transient worker that is used to listen to certain plum_db events and

@@ -29,10 +29,11 @@ echo ""
 
 # Run the benchmark
 # The default CMD runs a quick 30-second test
+# Note: COZODB_JEMALLOC_BACKGROUND_THREAD is intentionally NOT set (defaults to false)
+# to prevent SIGSEGV in container environments.
 docker run --rm \
     -e COZODB_JEMALLOC_DIRTY_DECAY_MS=1000 \
     -e COZODB_JEMALLOC_MUZZY_DECAY_MS=1000 \
-    -e COZODB_JEMALLOC_BACKGROUND_THREAD=true \
     cozodb-benchmark-test "$@"
 
 echo ""

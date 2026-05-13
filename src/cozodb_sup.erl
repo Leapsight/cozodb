@@ -16,7 +16,6 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 -module(cozodb_sup).
 -moduledoc "The CozoDB top level supervisor.".
 -behaviour(supervisor).
@@ -51,6 +50,14 @@ init([]) ->
             restart => permanent,
             shutdown => 5_000,
             modules => [cozodb_callback_monitor]
+        },
+        #{
+            id => cozodb_migrator_server,
+            start => {cozodb_migrator_server, start_link, []},
+            type => worker,
+            restart => permanent,
+            shutdown => 5_000,
+            modules => [cozodb_migrator_server]
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

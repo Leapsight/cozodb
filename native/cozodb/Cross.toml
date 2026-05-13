@@ -1,0 +1,40 @@
+# Cross compilation configuration for cozodb NIF
+# See: https://github.com/cross-rs/cross
+
+[build.env]
+passthrough = [
+    "RUST_BACKTRACE",
+    "LIBCLANG_PATH",
+    "LLVM_CONFIG_PATH",
+    "BINDGEN_EXTRA_CLANG_ARGS",
+]
+
+# ==============================================================================
+# aarch64-unknown-linux-gnu - use clang for C++20 support
+# ==============================================================================
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
+pre-build = [
+    "apt-get update && apt-get install -y libclang-dev clang llvm lld",
+]
+
+[target.aarch64-unknown-linux-gnu.env]
+passthrough = ["RUST_BACKTRACE"]
+# Force clang as C++ compiler with C++20 and correct target
+variables = [
+    ["CXX_aarch64_unknown_linux_gnu", "clang++"],
+    ["CC_aarch64_unknown_linux_gnu", "clang"],
+    ["CXX_aarch64-unknown-linux-gnu", "clang++"],
+    ["CC_aarch64-unknown-linux-gnu", "clang"],
+    ["CXXFLAGS", "-std=c++20 --target=aarch64-linux-gnu -I/usr/aarch64-linux-gnu/include"],
+    ["CFLAGS", "--target=aarch64-linux-gnu"],
+]
+
+# ==============================================================================
+# riscv64 - already works with standard image
+# ==============================================================================
+[target.riscv64gc-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/riscv64gc-unknown-linux-gnu:main"
+pre-build = [
+    "apt-get update && apt-get install -y libclang-dev clang llvm",
+]

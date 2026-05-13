@@ -1,0 +1,50 @@
+FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install newer GCC (10+) for C++20 support required by RocksDB
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get update && \
+    apt-get install -y \
+        gcc-10 \
+        g++-10 \
+        gcc-10-aarch64-linux-gnu \
+        g++-10-aarch64-linux-gnu \
+        libclang-dev \
+        clang \
+        llvm \
+        lld && \
+    # Clean up
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set GCC 10 as default for Debian-style compiler names
+RUN update-alternatives --install /usr/bin/aarch64-linux-gnu-gcc aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-gnu-gcc-10 100 && \
+    update-alternatives --install /usr/bin/aarch64-linux-gnu-g++ aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-gnu-g++-10 100 && \
+    update-alternatives --set aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-gnu-gcc-10 && \
+    update-alternatives --set aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-gnu-g++-10
+
+# Also handle Rust triplet names (aarch64-unknown-linux-gnu-g++) if present
+RUN if [ -f /usr/bin/aarch64-unknown-linux-gnu-g++ ]; then \
+        mv /usr/bin/aarch64-unknown-linux-gnu-g++ /usr/bin/aarch64-unknown-linux-gnu-g++.old; \
+    fi && \
+    if [ -f /usr/bin/aarch64-unknown-linux-gnu-gcc ]; then \
+        mv /usr/bin/aarch64-unknown-linux-gnu-gcc /usr/bin/aarch64-unknown-linux-gnu-gcc.old; \
+    fi && \
+    ln -sf /usr/bin/aarch64-linux-gnu-g++-10 /usr/bin/aarch64-unknown-linux-gnu-g++ && \
+    ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 /usr/bin/aarch64-unknown-linux-gnu-gcc
+
+# Also check /x-tools for crosstool-ng compilers and override those too
+RUN find /x-tools -name "aarch64-unknown-linux-gnu-g++" -type f 2>/dev/null | while read f; do \
+        mv "$f" "$f.old" && \
+        ln -sf /usr/bin/aarch64-linux-gnu-g++-10 "$f"; \
+    done || true && \
+    find /x-tools -name "aarch64-unknown-linux-gnu-gcc" -type f 2>/dev/null | while read f; do \
+        mv "$f" "$f.old" && \
+        ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 "$f"; \
+    done || true
+
+# Verify GCC version (should show GCC 10)
+RUN aarch64-linux-gnu-g++ --version | head -1

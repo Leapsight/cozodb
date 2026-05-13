@@ -6,6 +6,9 @@
     {applications, [
         kernel,
         stdlib,
+        crypto,
+        inets,
+        ssl,
         telemetry
     ]},
     {env, []},

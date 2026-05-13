@@ -1,0 +1,73 @@
+name: Build Cross-Compilation Images
+
+on:
+  push:
+    paths:
+      - '.cross/Dockerfile.*'
+      - '.github/workflows/build-cross-images.yml'
+    branches:
+      - main
+      - 'fix/**'
+  workflow_dispatch:
+
+concurrency:
+  group: build-cross-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/cozodb-cross
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            dockerfile: .cross/Dockerfile.aarch64-unknown-linux-gnu
+          - target: arm-unknown-linux-gnueabihf
+            dockerfile: .cross/Dockerfile.arm-unknown-linux-gnueabihf
+          - target: aarch64-unknown-linux-musl
+            dockerfile: .cross/Dockerfile.aarch64-unknown-linux-musl
+          - target: x86_64-unknown-linux-musl
+            dockerfile: .cross/Dockerfile.x86_64-unknown-linux-musl
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.target }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

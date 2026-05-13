@@ -1,0 +1,53 @@
+FROM ghcr.io/cross-rs/arm-unknown-linux-gnueabihf:main
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install newer GCC (10+) for C++20 support required by RocksDB
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get update && \
+    apt-get install -y \
+        gcc-10 \
+        g++-10 \
+        gcc-10-arm-linux-gnueabihf \
+        g++-10-arm-linux-gnueabihf \
+        libclang-dev \
+        clang \
+        llvm \
+        lld && \
+    # Clean up
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set GCC 10 as default for Debian-style compiler names
+RUN update-alternatives --install /usr/bin/arm-linux-gnueabihf-gcc arm-linux-gnueabihf-gcc /usr/bin/arm-linux-gnueabihf-gcc-10 100 && \
+    update-alternatives --install /usr/bin/arm-linux-gnueabihf-g++ arm-linux-gnueabihf-g++ /usr/bin/arm-linux-gnueabihf-g++-10 100 && \
+    update-alternatives --set arm-linux-gnueabihf-gcc /usr/bin/arm-linux-gnueabihf-gcc-10 && \
+    update-alternatives --set arm-linux-gnueabihf-g++ /usr/bin/arm-linux-gnueabihf-g++-10
+
+# The cross-rs image for arm uses Rust triplet names (arm-unknown-linux-gnueabihf-g++)
+# which come from crosstool-ng. We need to replace those with GCC 10 wrappers.
+# First, backup the old compilers, then create symlinks to GCC 10
+RUN if [ -f /usr/bin/arm-unknown-linux-gnueabihf-g++ ]; then \
+        mv /usr/bin/arm-unknown-linux-gnueabihf-g++ /usr/bin/arm-unknown-linux-gnueabihf-g++.old; \
+    fi && \
+    if [ -f /usr/bin/arm-unknown-linux-gnueabihf-gcc ]; then \
+        mv /usr/bin/arm-unknown-linux-gnueabihf-gcc /usr/bin/arm-unknown-linux-gnueabihf-gcc.old; \
+    fi && \
+    ln -sf /usr/bin/arm-linux-gnueabihf-g++-10 /usr/bin/arm-unknown-linux-gnueabihf-g++ && \
+    ln -sf /usr/bin/arm-linux-gnueabihf-gcc-10 /usr/bin/arm-unknown-linux-gnueabihf-gcc
+
+# Also check /x-tools for crosstool-ng compilers and override those too
+RUN find /x-tools -name "arm-unknown-linux-gnueabihf-g++" -type f 2>/dev/null | while read f; do \
+        mv "$f" "$f.old" && \
+        ln -sf /usr/bin/arm-linux-gnueabihf-g++-10 "$f"; \
+    done || true && \
+    find /x-tools -name "arm-unknown-linux-gnueabihf-gcc" -type f 2>/dev/null | while read f; do \
+        mv "$f" "$f.old" && \
+        ln -sf /usr/bin/arm-linux-gnueabihf-gcc-10 "$f"; \
+    done || true
+
+# Verify GCC version (should show GCC 10)
+RUN arm-linux-gnueabihf-g++ --version | head -1
+RUN which arm-unknown-linux-gnueabihf-g++ && arm-unknown-linux-gnueabihf-g++ --version | head -1 || echo "arm-unknown-linux-gnueabihf-g++ not in PATH"

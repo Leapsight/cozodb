@@ -12,11 +12,29 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustler = {version = "=0.37.0", features = ["nif_version_2_17"]}
-cozo = {git = "https://github.com/aramallo/cozo.git", tag = "v0.8.8-leapsight" }
+# Using local path temporarily to test new memory stats functionality
+cozo = {git = "https://github.com/aramallo/cozo.git", tag = "v0.8.8-leapsight", features = ["io-uring"] }
 uuid = "1.3.3"
 threadpool = "1.8.1"
 once_cell = "1.21.3"
 num_cpus = "1.17.0"
+
+# Memory allocator - jemalloc (optional, controlled by feature flag)
+# Only compile on non-MSVC platforms when jemalloc feature is enabled
+# Note: disable-initial-exec-tls is required for Docker/dlopen() compatibility
+# to avoid "cannot allocate memory in static TLS block" errors
+# ==============================================================================
+# Pin the following to match cozo's working version
+# ==============================================================================
+graph = "=0.3.1"  # uses graph_builder 0.4.0
+graph_builder = "=0.4.0"  # uses rayon 1.10.0
+rayon = "=1.10.0"
+ndarray = "0.15.6"
+serde_json = "1.0.116"
+serde = { version = "1.0.199", features = ["derive"] }
+serde_derive = "1.0.199"
+lazy_static = "1.4.0"
+crossbeam = "0.8.4"
 
 # Memory allocator - jemalloc (optional, controlled by feature flag)
 # Only compile on non-MSVC platforms when jemalloc feature is enabled
@@ -27,25 +45,19 @@ tikv-jemallocator = { version = "0.6", features = ["stats", "disable_initial_exe
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 tikv-jemalloc-sys = { version = "0.6", features = ["stats", "disable_initial_exec_tls"], optional = true }
 
-# ==============================================================================
-# Pin the following to match cozo's working version
-graph = "=0.3.1"  # uses graph_builder 0.4.0
-graph_builder = "=0.4.0"  # uses rayon 1.10.0
-rayon = "=1.10.0"
-ndarray = "0.15.6"
-serde_json = "1.0.116"
-serde = { version = "1.0.199", features = ["derive"] }
-serde_derive = "1.0.199"
-lazy_static = "1.4.0"
-crossbeam = "0.8.4"
-# ==============================================================================
-
 [features]
 default = [
     "cozo/storage-sqlite",
     "cozo/storage-rocksdb",
     "cozo/graph-algo",
     "jemalloc"  # jemalloc with 0ms decay: best throughput + low memory retention
+]
+
+# Windows default - same as default but without jemalloc (not available on Windows/MSVC)
+windows-default = [
+    "cozo/storage-sqlite",
+    "cozo/storage-rocksdb",
+    "cozo/graph-algo",
 ]
 
 # IMPORTANT: storage-rocksdb (cozorocks) and storage-new-rocksdb (rust-rocksdb) are
@@ -121,4 +133,3 @@ jemalloc-profiling = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/profilin
 # RocksDB falls back to standard pread/pwrite which performs well.
 # Enable via: COZODB_IO_URING=true make build
 io-uring = ["cozo/io-uring"]
-

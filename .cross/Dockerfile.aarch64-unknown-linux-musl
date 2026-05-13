@@ -1,0 +1,66 @@
+FROM ghcr.io/cross-rs/aarch64-unknown-linux-musl:main
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install newer GCC (10+) for C++20 support required by RocksDB
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
+    apt-get update && \
+    apt-get install -y \
+        gcc-10 \
+        g++-10 \
+        gcc-10-aarch64-linux-gnu \
+        g++-10-aarch64-linux-gnu \
+        libclang-dev \
+        clang \
+        llvm \
+        lld && \
+    # Clean up
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set GCC 10 as default host compiler
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100 && \
+    update-alternatives --set gcc /usr/bin/gcc-10 && \
+    update-alternatives --set g++ /usr/bin/g++-10
+
+# Set GCC 10 as default aarch64 cross-compiler (Debian-style names)
+RUN update-alternatives --install /usr/bin/aarch64-linux-gnu-gcc aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-gnu-gcc-10 100 && \
+    update-alternatives --install /usr/bin/aarch64-linux-gnu-g++ aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-gnu-g++-10 100 && \
+    update-alternatives --set aarch64-linux-gnu-gcc /usr/bin/aarch64-linux-gnu-gcc-10 && \
+    update-alternatives --set aarch64-linux-gnu-g++ /usr/bin/aarch64-linux-gnu-g++-10
+
+# Handle musl compiler names - both Debian-style and Rust triplet style
+RUN if [ -f /usr/bin/aarch64-linux-musl-g++ ]; then \
+        mv /usr/bin/aarch64-linux-musl-g++ /usr/bin/aarch64-linux-musl-g++.old; \
+    fi && \
+    if [ -f /usr/bin/aarch64-linux-musl-gcc ]; then \
+        mv /usr/bin/aarch64-linux-musl-gcc /usr/bin/aarch64-linux-musl-gcc.old; \
+    fi && \
+    ln -sf /usr/bin/aarch64-linux-gnu-g++-10 /usr/bin/aarch64-linux-musl-g++ && \
+    ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 /usr/bin/aarch64-linux-musl-gcc
+
+# Handle Rust triplet names
+RUN if [ -f /usr/bin/aarch64-unknown-linux-musl-g++ ]; then \
+        mv /usr/bin/aarch64-unknown-linux-musl-g++ /usr/bin/aarch64-unknown-linux-musl-g++.old; \
+    fi && \
+    if [ -f /usr/bin/aarch64-unknown-linux-musl-gcc ]; then \
+        mv /usr/bin/aarch64-unknown-linux-musl-gcc /usr/bin/aarch64-unknown-linux-musl-gcc.old; \
+    fi && \
+    ln -sf /usr/bin/aarch64-linux-gnu-g++-10 /usr/bin/aarch64-unknown-linux-musl-g++ && \
+    ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 /usr/bin/aarch64-unknown-linux-musl-gcc
+
+# Also check /x-tools for crosstool-ng compilers and override those too
+RUN find /x-tools -name "aarch64-unknown-linux-musl-g++" -type f 2>/dev/null | while read f; do \
+        mv "$f" "$f.old" && \
+        ln -sf /usr/bin/aarch64-linux-gnu-g++-10 "$f"; \
+    done || true && \
+    find /x-tools -name "aarch64-unknown-linux-musl-gcc" -type f 2>/dev/null | while read f; do \
+        mv "$f" "$f.old" && \
+        ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 "$f"; \
+    done || true
+
+# Verify GCC version
+RUN aarch64-linux-gnu-g++ --version | head -1

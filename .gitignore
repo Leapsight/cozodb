@@ -8,6 +8,8 @@ _*
 *.swp
 *.swo
 .erlang.cookie
+.env
+.env.*
 ebin
 log
 erl_crash.dump

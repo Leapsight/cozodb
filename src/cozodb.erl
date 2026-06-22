@@ -453,6 +453,17 @@ COZODB_JEMALLOC_NARENAS=8 rebar3 shell
 %% API: Maintenance
 -export([compact/1]).
 
+%% API: Archiving
+-export([archive_config_put/3]).
+-export([archive_config_put/4]).
+-export([archive_config_get/1]).
+-export([archive_config_get/2]).
+-export([archive_config_remove/2]).
+-export([replicate_pending/2]).
+-export([archive/3]).
+-export([advance_watermark/3]).
+-export([import_parquet/3]).
+
 %% API: Debug/Profiling
 -export([memory_stats/0]).
 -export([flush_memtables/1]).
@@ -1162,6 +1173,184 @@ compact(Dbhandle) ->
     end.
 
 %% =============================================================================
+%% API: Archiving
+%% =============================================================================
+
+-doc """
+Configure relation `RelName` for archiving, recording that its cozo-managed
+commit timestamp (set with `commit_now()`) lives in column `TsCol`.
+
+This no-destination form is enough to set a watermark manually, but a
+destination URI must be supplied (see `archive_config_put/4`) before
+`replicate_pending/2` can run.
+""".
+-spec archive_config_put(
+    DbHandle :: db_handle(),
+    RelName :: binary() | list() | atom(),
+    TsCol :: binary() | list() | atom()
+) -> ok | {error, Reason :: any()}.
+
+archive_config_put(DbHandle, RelName, TsCol) ->
+    archive_config_put(DbHandle, RelName, TsCol, #{}).
+
+-doc """
+Configure relation `RelName` for archiving with options.
+
+`Opts` (all keys optional):
+- `uri` :: binary() | list() — destination: `s3://bucket/prefix/`,
+  `file:///abs/path/`, or a bare local path. Required before `replicate_pending/2`.
+- `encryption` :: `none` | `sse_s3` | `sse_kms` — S3 server-side encryption.
+- `kms_arn` :: binary() | list() — required iff `encryption` is `sse_kms`.
+- `max_rows_per_segment` :: pos_integer() — per-segment row cap (default 100000).
+
+The CozoScript option slots are positional, so `encryption` requires `uri` and
+`kms_arn` requires `encryption`; violating this raises `badarg`.
+
+#### Example
+```
+1> cozodb:archive_config_put(Db, orders, updated_at, #{
+    uri => <<"s3://my-bucket/cozo/orders/">>,
+    encryption => sse_kms,
+    kms_arn => <<"arn:aws:kms:eu-west-1:111122223333:key/abcd">>,
+    max_rows_per_segment => 100000
+}).
+ok
+```
+""".
+-spec archive_config_put(
+    DbHandle :: db_handle(),
+    RelName :: binary() | list() | atom(),
+    TsCol :: binary() | list() | atom(),
+    Opts :: map()
+) -> ok | {error, Reason :: any()} | no_return().
+
+archive_config_put(DbHandle, RelName, TsCol, Opts) when is_map(Opts) ->
+    case archive_put_optional(Opts) of
+        {ok, Optional} ->
+            Cmd = iolist_to_binary([
+                <<"::archive_config put ">>,
+                quote(RelName), $\s, quote(TsCol), Optional
+            ]),
+            case run(DbHandle, Cmd) of
+                {ok, _} ->
+                    ok;
+                {error, Reason} ->
+                    {error, format_error(?FUNCTION_NAME, Reason)}
+            end;
+        {error, Msg} ->
+            ?ERROR(badarg, [DbHandle, RelName, TsCol, Opts], #{4 => Msg})
+    end.
+
+-doc """
+List all archive configurations.
+""".
+-spec archive_config_get(DbHandle :: db_handle()) -> query_return().
+
+archive_config_get(DbHandle) ->
+    run(DbHandle, <<"::archive_config get">>).
+
+-doc """
+List the archive configuration for `RelName`.
+""".
+-spec archive_config_get(
+    DbHandle :: db_handle(), RelName :: binary() | list() | atom()
+) -> query_return().
+
+archive_config_get(DbHandle, RelName) ->
+    run(DbHandle, iolist_to_binary([<<"::archive_config get ">>, quote(RelName)])).
+
+-doc """
+Remove the archive configuration (and watermark) for `RelName`.
+""".
+-spec archive_config_remove(
+    DbHandle :: db_handle(), RelName :: binary() | list() | atom()
+) -> ok | {error, Reason :: any()}.
+
+archive_config_remove(DbHandle, RelName) ->
+    Cmd = iolist_to_binary([<<"::archive_config remove ">>, quote(RelName)]),
+    case run(DbHandle, Cmd) of
+        {ok, _} ->
+            ok;
+        {error, Reason} ->
+            {error, format_error(?FUNCTION_NAME, Reason)}
+    end.
+
+-doc """
+Replicate every committed row of `RelName` whose commit timestamp is past the
+watermark into one or more Parquet segments at the configured destination, then
+advance the watermark. Idempotent: a call with no new rows is a no-op.
+
+Returns a single summary row with columns: `status`, `rows_replicated`,
+`segments_written`, `old_watermark`, `new_watermark`. Per-segment details (id,
+file path, ts range, sha256) are queryable from the `cozo_archive_segments`
+system relation.
+""".
+-spec replicate_pending(
+    DbHandle :: db_handle(), RelName :: binary() | list() | atom()
+) -> query_return().
+
+replicate_pending(DbHandle, RelName) ->
+    run(DbHandle, iolist_to_binary([<<"::replicate_pending ">>, quote(RelName)])).
+
+-doc """
+Delete from `RelName` the rows returned by `KeyQuery` whose commit timestamp is
+at or below the watermark (i.e. already replicated). `KeyQuery` is a CozoScript
+query producing the relation's key column(s), e.g. `<<"?[id] := *orders{id}">>`.
+
+Deletes via the raw store layer — triggers do NOT fire (this is a bulk-load
+semantic). Returns a summary row with columns: `status`, `archived`, `skipped`
+(still pending replication), `missing`, `watermark`.
+""".
+-spec archive(
+    DbHandle :: db_handle(),
+    RelName :: binary() | list() | atom(),
+    KeyQuery :: binary() | list()
+) -> query_return().
+
+archive(DbHandle, RelName, KeyQuery) ->
+    Cmd = iolist_to_binary([
+        <<"::archive ">>, to_bin(RelName), <<" { ">>, to_bin(KeyQuery), <<" }">>
+    ]),
+    run(DbHandle, Cmd).
+
+-doc """
+Admin/recovery op: set the archive watermark for `RelName` to `Ts` directly.
+Normally the replicator advances the watermark; use this only to force a known
+value (e.g. coming back from disaster recovery).
+""".
+-spec advance_watermark(
+    DbHandle :: db_handle(),
+    RelName :: binary() | list() | atom(),
+    Ts :: integer()
+) -> query_return().
+
+advance_watermark(DbHandle, RelName, Ts) when is_integer(Ts) ->
+    Cmd = iolist_to_binary([
+        <<"::archive_advance_watermark ">>,
+        quote(RelName), $\s, integer_to_binary(Ts)
+    ]),
+    run(DbHandle, Cmd).
+
+-doc """
+Import a Parquet segment into `RelName`. `Uri` may be a local path, a `file://`
+URI, or an `s3://bucket/key` URI (restore reads back directly from object
+storage). Columns are matched to the relation schema by name.
+
+Returns a summary row with columns: `status`, `rows`.
+""".
+-spec import_parquet(
+    DbHandle :: db_handle(),
+    RelName :: binary() | list() | atom(),
+    Uri :: binary() | list()
+) -> query_return().
+
+import_parquet(DbHandle, RelName, Uri) ->
+    Cmd = iolist_to_binary([
+        <<"::import_parquet ">>, to_bin(RelName), <<" from ">>, quote(Uri)
+    ]),
+    run(DbHandle, Cmd).
+
+%% =============================================================================
 %% API: Debug/Profiling
 %% =============================================================================
 
@@ -1714,6 +1903,65 @@ index_type_op(fts) -> <<"fts">>;
 index_type_op(hnsw) -> <<"hnsw">>;
 index_type_op(lsh) -> <<"lsh">>;
 index_type_op(_) -> error(badarg).
+
+%% @private
+%% @doc Single-quote a value as a CozoScript string literal.
+quote(Val) ->
+    Bin = to_bin(Val),
+    <<$', Bin/binary, $'>>.
+
+%% @private
+%% @doc Coerce an atom/list/binary to a binary.
+to_bin(Val) when is_binary(Val) -> Val;
+to_bin(Val) when is_list(Val) -> list_to_binary(Val);
+to_bin(Val) when is_atom(Val) -> atom_to_binary(Val, utf8).
+
+%% @private
+%% @doc Build the trailing positional options for `::archive_config put`.
+%% Returns `{ok, IoData}` or `{error, Message}` when the positional rules are
+%% violated (encryption needs uri, kms needs encryption) or max_rows is invalid.
+archive_put_optional(Opts) ->
+    Uri = opt_bin(maps:get(uri, Opts, undefined)),
+    Enc = encryption_to_cozo(maps:get(encryption, Opts, undefined)),
+    Kms = opt_bin(maps:get(kms_arn, Opts, undefined)),
+    Max = maps:get(max_rows_per_segment, Opts, undefined),
+    case {archive_put_strings(Uri, Enc, Kms), Max} of
+        {{ok, Strings}, undefined} ->
+            {ok, [[$\s, quote(S)] || S <- Strings]};
+        {{ok, Strings}, N} when is_integer(N), N >= 1 ->
+            {ok, [[$\s, quote(S)] || S <- Strings] ++ [[$\s, integer_to_binary(N)]]};
+        {{ok, _}, _} ->
+            {error, <<"`max_rows_per_segment` must be a positive integer">>};
+        {error, _} ->
+            {error, <<
+                "positional options: `encryption` requires `uri`, "
+                "and `kms_arn` requires `encryption`"
+            >>}
+    end.
+
+%% @private
+archive_put_strings(undefined, undefined, undefined) ->
+    {ok, []};
+archive_put_strings(U, undefined, undefined) when U =/= undefined ->
+    {ok, [U]};
+archive_put_strings(U, E, undefined) when U =/= undefined, E =/= undefined ->
+    {ok, [U, E]};
+archive_put_strings(U, E, K) when U =/= undefined, E =/= undefined, K =/= undefined ->
+    {ok, [U, E, K]};
+archive_put_strings(_, _, _) ->
+    error.
+
+%% @private
+opt_bin(undefined) -> undefined;
+opt_bin(Val) -> to_bin(Val).
+
+%% @private
+encryption_to_cozo(undefined) -> undefined;
+encryption_to_cozo(none) -> <<"none">>;
+encryption_to_cozo(sse_s3) -> <<"sse-s3">>;
+encryption_to_cozo(sse_kms) -> <<"sse-kms">>;
+encryption_to_cozo(Val) when is_binary(Val) -> Val;
+encryption_to_cozo(Val) when is_list(Val) -> list_to_binary(Val).
 
 %% @private
 -spec term_to_json_object(Term :: map() | [{atom() | binary(), any()}]) ->

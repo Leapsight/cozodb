@@ -333,7 +333,14 @@ production.
   replicated, archived, or parquet-imported — all three refuse with a clear
   error.
 - **Supported column types:** `Bool, Int, Float, String, Bytes, Uuid, Validity,
-  List of those`. `Json` and other exotic types are not exportable yet.
+  Json, List of those` (since cozo `v0.8.10-leapsight`). A `Json` column is
+  stored as a portable UTF-8 string of JSON text in the Parquet segment — any
+  external reader (DuckDB, Spark, pandas, Trino, …) sees a standard string column
+  it can parse directly — and is reconstructed faithfully as a `Json` value on
+  `import_parquet/3`. Object keys are emitted in a normalised (sorted) order;
+  the JSON is otherwise byte-for-byte the value you stored. Still **not**
+  exportable: `Any`, `Vec`, `Tuple`, and `List of Json` — these refuse with a
+  clear error at drain time (before any S3 upload or watermark advance).
 - **Collection phase is in memory.** The set of rows past the watermark is held
   in memory during a drain (bounded by how far behind the watermark is, not the
   relation size). Drain frequently to keep this small.

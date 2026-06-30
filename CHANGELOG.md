@@ -1,8 +1,11 @@
 # CHANGELOG
-# 0.4.0
+# 0.4.1
 * Upgraded cozo dependency to `v0.8.10-leapsight`.
-* Relation archiving / replication of committed rows to an S3-compatible datalake as typed Parquet segments, with restore via `import_parquet/3` (introduced in this cycle).
-* **`Json` columns are now archivable** (cozo `v0.8.10-leapsight`). A `Json` column is written to Parquet as a portable UTF-8 string of JSON text, so any external reader (DuckDB, Spark, pandas, Trino, …) sees a standard string column it can parse directly; on `import_parquet/3` it is reconstructed faithfully as a `Json` value. Object keys are emitted in a normalised (sorted) order. Still unsupported for archiving: `Any`, `Vec`, `Tuple`, and `List of Json`, which fail cleanly at drain time. See `doc_extras/replication.md`.
+* **`Json` columns are now archivable.** A `Json` column is written to Parquet as a portable UTF-8 string of JSON text, so any external reader (DuckDB, Spark, pandas, Trino, …) sees a standard string column it can parse directly; on `import_parquet/3` it is reconstructed faithfully as a `Json` value. Object keys are emitted in a normalised (sorted) order. Still unsupported for archiving: `Any`, `Vec`, `Tuple`, and `List of Json`, which fail cleanly at drain time. See `doc_extras/replication.md`. Covered by `cozodb_archive_SUITE:replicate_and_restore_json_round_trip`.
+
+# 0.4.0
+* Upgraded cozo dependency to `v0.8.9-leapsight`.
+* Relation archiving / replication of committed rows to an S3-compatible datalake as typed Parquet segments, with restore via `import_parquet/3`.
 
 # 0.3.10
 * Upgraded cozo libr with a fix to read-only transactions. They now use RocksDB snapshots to avoid issues with multithreading and locking.

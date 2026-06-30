@@ -59,6 +59,7 @@ all() ->
     [
         archive_config_crud,
         replicate_and_restore_round_trip,
+        replicate_and_restore_json_round_trip,
         replicate_idempotent_noop,
         archive_deletes_replicated_rows
     ].
@@ -160,6 +161,64 @@ replicate_and_restore_round_trip(Config) ->
         [[1, <<"a">>], [2, <<"b">>], [3, <<"c">>]],
         lists:sort(Restored)
     ).
+
+-doc "write a Json column -> replicate to S3 -> restore -> JSON value round-trips.".
+replicate_and_restore_json_round_trip(Config) ->
+    Db = ?config(db, Config),
+    Uri = ?config(uri, Config),
+    {ok, _} = cozodb:run(
+        Db,
+        <<":create orders {id: Int => doc: Json, ts: Int default commit_now()}">>
+    ),
+    ok = cozodb:archive_config_put(Db, orders, ts, #{uri => Uri}),
+
+    %% A nested JSON document. Erlang map keys are unordered and cozo emits
+    %% object keys in a normalised (sorted) order, so we compare by decoding the
+    %% JSON, not by comparing raw bytes.
+    Doc = #{
+        <<"a">> => 1,
+        <<"b">> => [true, <<"x">>],
+        <<"nested">> => #{<<"c">> => 2}
+    },
+    DocBin = iolist_to_binary(json:encode(Doc)),
+    %% A Json value is passed in as the `{json, Binary}` tuple and stored in the
+    %% Json column (NOT as a plain string, which would be re-wrapped as a JSON
+    %% string node).
+    {ok, _} = cozodb:run(
+        Db,
+        <<"?[id, doc] := id = 1, doc = $doc\n:put orders {id => doc}">>,
+        #{parameters => #{<<"doc">> => {json, DocBin}}}
+    ),
+
+    %% Replicate: the Json column is encoded to Parquet as portable UTF-8 text.
+    {ok, #{rows := [[<<"OK">>, RowsRepl, Segs, _Old, NewWm]]}} =
+        cozodb:replicate_pending(Db, orders),
+    ?assertEqual(1, RowsRepl),
+    ?assert(Segs >= 1),
+    ?assert(NewWm > 0),
+
+    {ok, #{rows := [[S3Path]]}} = cozodb:run(
+        Db, <<"?[f] := *cozo_archive_segments{file_path: f}">>
+    ),
+    ?assertMatch(<<"s3://", _/binary>>, S3Path),
+
+    %% Restore into a fresh relation declaring the same Json column.
+    {ok, _} = cozodb:run(
+        Db, <<":create restored {id: Int => doc: Json, ts: Int}">>
+    ),
+    {ok, #{rows := [[<<"OK">>, Imported]]}} =
+        cozodb:import_parquet(Db, restored, S3Path),
+    ?assertEqual(1, Imported),
+
+    %% The Json value comes back as `{json, Binary}`; a plain binary here would
+    %% mean the double-encode regression. Decode and compare to the original.
+    {ok, #{rows := [[Id, RestoredDoc]]}} = cozodb:run(
+        Db, <<"?[id, doc] := *restored{id, doc}">>
+    ),
+    ?assertEqual(1, Id),
+    ?assertMatch({json, _}, RestoredDoc),
+    {json, RestoredBin} = RestoredDoc,
+    ?assertEqual(Doc, json:decode(RestoredBin)).
 
 -doc "a second drain with no new rows is a no-op (no extra segment).".
 replicate_idempotent_noop(Config) ->
